@@ -1,5 +1,5 @@
 ---
-name: workflow-yaml-creator
+name: jobworkerp-workflow
 description: >-
   Create and edit workflow YAML compliant with jobworkerp-rs Custom Serverless Workflow DSL v1.0.0.
   Use when the user requests creating workflow definitions, modifying existing workflows, or understanding workflow structure.
@@ -287,11 +287,28 @@ onError: continue    # Skip failures, process remaining items
 
 See [Examples](references/examples.md) for more comprehensive patterns with full context.
 
+## Discovering Runner Schemas
+
+For any runner (built-in, MCP server, or plugin), query the gRPC services to get the latest settings/arguments schema:
+
+- **RunnerService** (`FindByName`/`FindListBy`): Returns `RunnerData` with `runner_settings_proto` and `method_proto_map` (per-method `args_proto`, `result_proto`)
+- **FunctionService** (`FindByName`/`FindList`): Returns `FunctionSpecs` with JSON Schema versions (`settings_schema`, per-method `arguments_schema`, `result_schema`)
+
+```bash
+# Get runner schema by name (works for built-in, MCP, and plugin runners)
+grpcurl -plaintext -d '{"name":"LLM"}' localhost:9000 jobworkerp.service.RunnerService/FindByName
+
+# Get JSON Schema version (more convenient for workflow authoring)
+grpcurl -plaintext -d '{"runner_name":"COMMAND"}' localhost:9000 jobworkerp.function.service.FunctionService/FindByName
+```
+
+See [Runner Schemas](references/runner-schemas.md) for full details on the query APIs and built-in runner schemas.
+
 ## Important Notes
 
 1. **Runner names are case-sensitive**: `COMMAND`, `LLM`, `HTTP_REQUEST`, `GRPC_UNARY`, `DOCKER`, `PYTHON_COMMAND`, `SLACK_POST_MESSAGE`, `WORKFLOW`
 2. **MCP server names**: Match the name in `mcp-settings.toml` (e.g., `mcp-fetch`, `filesystem`)
-3. **Plugin runners**: Loaded from `PLUGINS_RUNNER_DIR` as `.so` files; settings/arguments depend on each plugin's implementation (see `plugins/hello_runner/` for example)
+3. **Plugin/MCP runner schemas**: Query via RunnerService or FunctionService gRPC APIs to get the latest settings/arguments definitions
 4. **`using` parameter**: Required for multi-method runners (LLM: `chat`/`completion`, WORKFLOW: `run`/`create`) and multi-tool MCP servers
 5. **Deprecated runners**: Do NOT use `LLM_COMPLETION`, `LLM_CHAT`, `INLINE_WORKFLOW`, `REUSABLE_WORKFLOW`, `CREATE_WORKFLOW`. Use `LLM` or `WORKFLOW` with `using` instead.
 6. **Settings field names**: Use camelCase in YAML (matching JSON protobuf serialization), e.g., `baseUrl`, `pullModel`, `maxTokens`

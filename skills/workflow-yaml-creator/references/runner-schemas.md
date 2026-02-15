@@ -4,6 +4,78 @@ Each runner's `settings` and `arguments` in workflow YAML correspond to JSON rep
 
 **Note on runtime expressions in settings/arguments:** Each value must be entirely a runtime expression (`${...}` or `$${...}`) or entirely a plain literal. You cannot mix plain text with expressions in a single value (e.g., `"Bearer ${env.TOKEN}"` is **invalid**). Use Liquid `$${Bearer {{ env.TOKEN }}}` or jq `${"Bearer " + env.TOKEN}` instead. See [Schema Reference](schema-reference.md#runtime-expressions) for details.
 
+## Querying Runner Schemas at Runtime
+
+The schemas documented below are the built-in defaults. For the **latest** settings/arguments schema of any runner (including MCP servers and plugins), query the gRPC services:
+
+### RunnerService (proto: `jobworkerp.service.RunnerService`)
+
+Use `FindByName` or `FindListBy` to get `RunnerData`:
+
+```
+RunnerData {
+  name: string                          # Runner name (e.g., "COMMAND", "mcp-fetch")
+  runner_settings_proto: string         # Protobuf definition for settings
+  method_proto_map: MethodProtoMap {    # Per-method schemas
+    schemas: map<string, MethodSchema>  # Key: method name (e.g., "run", "fetch_html")
+  }
+}
+
+MethodSchema {
+  args_proto: string                    # Protobuf definition for method arguments
+  result_proto: string                  # Protobuf definition for method result
+  description: optional string          # Human-readable method description
+  output_type: StreamingOutputType      # NON_STREAMING | STREAMING | BOTH
+}
+```
+
+- **Single-method runners** (COMMAND, HTTP_REQUEST, etc.): `method_proto_map` has one entry with key `"run"`
+- **Multi-method runners** (LLM, WORKFLOW): entries keyed by method name (e.g., `"chat"`, `"completion"`)
+- **MCP servers**: entries keyed by tool name (e.g., `"fetch"`, `"fetch_html"`)
+- **Plugins**: entries keyed by the plugin's registered method names
+
+### FunctionService (proto: `jobworkerp.function.service.FunctionService`)
+
+Use `FindByName` or `FindList` to get `FunctionSpecs` with **JSON Schema** (converted from protobuf):
+
+```
+FunctionSpecs {
+  name: string                          # Function name
+  settings_schema: string               # JSON Schema for settings
+  methods: MethodSchemaMap {
+    schemas: map<string, MethodSchema>  # Key: method name
+  }
+}
+
+MethodSchema (function layer) {
+  arguments_schema: string              # JSON Schema for arguments
+  result_schema: optional string        # JSON Schema for result
+  description: optional string          # Method description
+  output_type: StreamingOutputType
+}
+```
+
+### CLI Examples
+
+```bash
+# List all runners with their schemas
+grpcurl -plaintext localhost:9000 jobworkerp.service.RunnerService/FindListBy
+
+# Get specific runner by name
+grpcurl -plaintext -d '{"name":"LLM"}' localhost:9000 jobworkerp.service.RunnerService/FindByName
+
+# Get MCP server runner schema
+grpcurl -plaintext -d '{"name":"mcp-fetch"}' localhost:9000 jobworkerp.service.RunnerService/FindByName
+
+# Get function specs with JSON Schema (more convenient for workflow authoring)
+grpcurl -plaintext -d '{"runner_name":"COMMAND"}' \
+  localhost:9000 jobworkerp.function.service.FunctionService/FindByName
+```
+
+The `runner_settings_proto` and `MethodSchema.args_proto` fields contain protobuf message definitions as strings. The FunctionService provides the same information pre-converted to JSON Schema via `settings_schema` and `arguments_schema`.
+
+---
+
 ## COMMAND Runner
 
 No settings required.
