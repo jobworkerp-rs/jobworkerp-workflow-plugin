@@ -15,16 +15,27 @@ A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin that help
 ## Installation
 
 ```bash
-# In Claude Code, install from GitHub
-/plugin install jobworkerp-rs/workflow-yaml-creator-plugin
+# Step 1: Add the marketplace
+/plugin marketplace add jobworkerp-rs/workflow-yaml-creator-plugin
+
+# Step 2: Install the plugin
+/plugin install workflow-yaml-creator@workflow-yaml-creator-plugin
 ```
 
 Or add to your project's `.claude/settings.json`:
 
 ```json
 {
+  "extraKnownMarketplaces": {
+    "workflow-yaml-creator-plugin": {
+      "source": {
+        "source": "github",
+        "repo": "jobworkerp-rs/workflow-yaml-creator-plugin"
+      }
+    }
+  },
   "enabledPlugins": {
-    "workflow-yaml-creator@jobworkerp-rs/workflow-yaml-creator-plugin": true
+    "workflow-yaml-creator@workflow-yaml-creator-plugin": true
   }
 }
 ```
@@ -59,4 +70,4 @@ Example prompts:
 
 ## License
 
-Apache-2.0
+MIT
