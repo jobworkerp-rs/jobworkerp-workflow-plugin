@@ -1,12 +1,12 @@
 {
-  "name": "workflow-yaml-creator",
+  "name": "jobworkerp-workflow",
   "description": "Create and edit workflow YAML compliant with jobworkerp-rs Custom Serverless Workflow DSL v1.0.0. Supports built-in runners (COMMAND, LLM, HTTP_REQUEST, GRPC_UNARY, DOCKER, PYTHON_COMMAND, WORKFLOW, SLACK_POST_MESSAGE), MCP servers, plugin runners, flow control (for, fork, switch, try-catch), and jq/Liquid runtime expressions.",
   "version": "1.0.0",
   "author": {
     "name": "sutr",
     "email": ""
   },
-  "homepage": "https://github.com/jobworkerp-rs/workflow-yaml-creator-plugin",
-  "repository": "https://github.com/jobworkerp-rs/workflow-yaml-creator-plugin",
+  "homepage": "https://github.com/jobworkerp-rs/jobworkerp-workflow-plugin",
+  "repository": "https://github.com/jobworkerp-rs/jobworkerp-workflow-plugin",
   "license": "MIT"
 }

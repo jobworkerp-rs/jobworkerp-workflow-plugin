@@ -1,4 +1,4 @@
-# workflow-yaml-creator
+# jobworkerp-workflow
 
 A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin that helps create and edit workflow YAML files compliant with [jobworkerp-rs](https://github.com/jobworkerp-rs/jobworkerp-rs) Custom Serverless Workflow DSL v1.0.0.
 
@@ -16,10 +16,10 @@ A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin that help
 
 ```bash
 # Step 1: Add the marketplace
-/plugin marketplace add jobworkerp-rs/workflow-yaml-creator-plugin
+/plugin marketplace add jobworkerp-rs/jobworkerp-workflow-plugin
 
 # Step 2: Install the plugin
-/plugin install workflow-yaml-creator@workflow-yaml-creator-plugin
+/plugin install jobworkerp-workflow@jobworkerp-workflow-plugin
 ```
 
 Or add to your project's `.claude/settings.json`:
@@ -27,15 +27,15 @@ Or add to your project's `.claude/settings.json`:
 ```json
 {
   "extraKnownMarketplaces": {
-    "workflow-yaml-creator-plugin": {
+    "jobworkerp-workflow-plugin": {
       "source": {
         "source": "github",
-        "repo": "jobworkerp-rs/workflow-yaml-creator-plugin"
+        "repo": "jobworkerp-rs/jobworkerp-workflow-plugin"
       }
     }
   },
   "enabledPlugins": {
-    "workflow-yaml-creator@workflow-yaml-creator-plugin": true
+    "jobworkerp-workflow@jobworkerp-workflow-plugin": true
   }
 }
 ```

@@ -1,5 +1,5 @@
 {
-  "name": "workflow-yaml-creator-plugin",
+  "name": "jobworkerp-workflow-plugin",
   "owner": {
     "name": "jobworkerp-rs"
   },
@@ -8,7 +8,7 @@
   },
   "plugins": [
     {
-      "name": "workflow-yaml-creator",
+      "name": "jobworkerp-workflow",
       "source": "./",
       "description": "Create and edit workflow YAML compliant with jobworkerp-rs Custom Serverless Workflow DSL v1.0.0. Supports built-in runners, MCP servers, plugin runners, flow control, and jq/Liquid runtime expressions.",
       "version": "1.0.0"
