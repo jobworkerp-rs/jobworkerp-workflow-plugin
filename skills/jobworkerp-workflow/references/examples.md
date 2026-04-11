@@ -405,39 +405,7 @@ Set and accumulate variables across workflow steps:
 
 Key pattern: `export.as` makes variables available as `$variableName` in subsequent tasks.
 
-## 12. Slack Post with Thread Management
-
-```yaml
-- PostToSlack:
-    if: '${.summary != null and .summary != ""}'
-    run:
-      runner:
-        name: SLACK_POST_MESSAGE
-        settings:
-          botToken: ${env.SLACK_BOT_TOKEN}
-        arguments:
-          channel: ${$workflow.input.slack_channel}
-          threadTs: ${.threadTs}
-          attachments:
-            - title: |-
-                $${[{{ categoryLabel }}] {{ currentDate }}}
-              text: |
-                ${.summary}
-              mrkdwnIn:
-                - text
-              color: "#36a64f"
-    output:
-      as:
-        threadTs: ${.ts // $input.threadTs}
-```
-
-Key patterns:
-- **`${env.SLACK_BOT_TOKEN}`**: Access environment variables for secrets
-- **`$workflow.input.slack_channel`**: Channel from workflow input (not hardcoded)
-- **Thread management**: `${.ts // $input.threadTs}` - first post creates thread, replies use it
-- **Fallback with `//`**: Use new value or keep existing
-
-## 13. Pre-configured Worker via runWorker
+## 12. Pre-configured Worker via runWorker
 
 Use a worker that was created separately (via gRPC API, CLI, or WORKFLOW `using: create`):
 
@@ -453,7 +421,7 @@ Use a worker that was created separately (via gRPC API, CLI, or WORKFLOW `using:
 
 Key pattern: `runWorker` references workers by name without needing to specify runner settings or options (already configured).
 
-## 14. switchTask - Conditional Branching
+## 13. switchTask - Conditional Branching
 
 ```yaml
 - RouteByType:
@@ -468,7 +436,7 @@ Key pattern: `runWorker` references workers by name without needing to specify r
           then: exit            # Exit current scope (no 'when' = default case)
 ```
 
-## 15. tryTask with Retry and Fallback
+## 14. tryTask with Retry and Fallback
 
 ```yaml
 - SafeApiCall:
@@ -502,7 +470,7 @@ Key pattern: `runWorker` references workers by name without needing to specify r
               errorDetail: ${$apiError.detail}
 ```
 
-## 16. forkTask for Concurrent Execution
+## 15. forkTask for Concurrent Execution
 
 ```yaml
 - ParallelFetch:
@@ -529,7 +497,7 @@ Key pattern: `runWorker` references workers by name without needing to specify r
       compete: false    # Wait for all branches (true = first completed wins)
 ```
 
-## 17. DOCKER Runner - Container Execution
+## 16. DOCKER Runner - Container Execution
 
 Run tasks inside Docker containers. Useful for sandboxed execution, CI-like tasks, or running tools
 that require specific environments. Input parameters should come from workflow input, not hardcoded.
@@ -645,7 +613,7 @@ Key patterns:
 - **Result access**: `stdout`, `stderr`, `exitCode` available in output (same as COMMAND)
 - **`settings.fromImage`** vs **`arguments.image`**: settings is for worker initialization (image pull), arguments is per-job (only effective when `useStatic: false`)
 
-## 18. GRPC Runner - gRPC API Calls
+## 17. GRPC Runner - gRPC API Calls
 
 Call gRPC services from a workflow. Use `using: unary` for regular RPCs and `using: streaming` for server-streaming RPCs.
 
@@ -684,7 +652,7 @@ Key patterns:
 - **Result fields**: `code` (gRPC status, 0=OK), `jsonBody` (if asJson), `body` (unary raw bytes), `metadata`, `message`
 - **Streaming RPCs**: Switch to `using: streaming`; the collected result returns `jsonBody` or `bodies.items`
 
-## 19. PYTHON_COMMAND Runner - Python Script Execution
+## 18. PYTHON_COMMAND Runner - Python Script Execution
 
 Run Python scripts with automatic dependency management via `uv`:
 
@@ -750,7 +718,7 @@ Key patterns:
 - **Result fields**: `output` (stdout), `outputStderr` (if `withStderr: true`), `exitCode`
 - **Data passing**: Use `dataBody` to pass JSON; read via `sys.stdin` in script
 
-## 20. WORKFLOW Runner - Nested Workflow Execution
+## 19. WORKFLOW Runner - Nested Workflow Execution
 
 Execute sub-workflows from a parent workflow using the unified `WORKFLOW` runner:
 
@@ -815,7 +783,7 @@ Key patterns:
 - **Create result fields**: `workerId.value` - ID of the created worker
 - After `using: create`, the worker can be referenced by name via `runWorker`
 
-## 21. Complete Multi-Step Workflow
+## 20. Complete Multi-Step Workflow
 
 A full example combining multiple patterns:
 

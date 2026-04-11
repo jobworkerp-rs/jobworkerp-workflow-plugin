@@ -346,44 +346,6 @@ Output fields: `exitCode`, `output` (stdout), `outputStderr`
 
 ---
 
-## SLACK_POST_MESSAGE Runner
-
-### Settings (SlackRunnerSettings)
-
-```yaml
-settings:
-  botToken: "xoxb-..."               # REQUIRED - Slack bot token
-  botName: "MyBot"                    # Optional - Bot display name
-```
-
-Note: Use `${env.SLACK_BOT_TOKEN}` to reference environment variables.
-
-### Arguments (SlackChatPostMessageArgs)
-
-```yaml
-arguments:
-  channel: "C12345678"               # REQUIRED - Channel ID or name
-  text: "Hello!"                      # Optional - Message text
-  threadTs: "1234567890.123456"       # Optional - Thread to reply to
-  attachments:                        # Optional - Rich attachments
-    - title: "Title"
-      text: "Attachment text"
-      color: "#36a64f"
-      mrkdwnIn: ["text"]
-  blocks: []                          # Optional - Block Kit blocks (JSON strings)
-  iconEmoji: ":robot:"               # Optional - Message icon emoji
-  linkNames: true                     # Optional - Link @mentions
-  mrkdwn: true                        # Optional - Parse markdown
-  replyBroadcast: false               # Optional - Broadcast thread reply
-  unfurlLinks: true                   # Optional - Show link previews
-```
-
-### Result (SlackChatPostMessageResult)
-
-Output fields: `channel`, `ts` (message timestamp), `message`
-
----
-
 ## WORKFLOW Runner (Multi-Method)
 
 ### Settings (WorkflowRunnerSettings)

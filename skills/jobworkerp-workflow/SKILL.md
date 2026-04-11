@@ -275,13 +275,6 @@ for:
   in: '${["ai_ml", "technology", "science"]}'
 ```
 
-### Thread Management (Slack)
-```yaml
-output:
-  as:
-    threadTs: ${.ts // $input.threadTs}  # First post creates thread, replies use it
-```
-
 ### Dynamic Strings with Liquid
 ```yaml
 path: |-
@@ -320,7 +313,7 @@ See [Runner Schemas](references/runner-schemas.md) for full details on the query
 
 ## Important Notes
 
-1. **Runner names are case-sensitive**: `COMMAND`, `LLM`, `HTTP_REQUEST`, `GRPC`, `DOCKER`, `PYTHON_COMMAND`, `SLACK_POST_MESSAGE`, `WORKFLOW`
+1. **Runner names are case-sensitive**: `COMMAND`, `LLM`, `HTTP_REQUEST`, `GRPC`, `DOCKER`, `PYTHON_COMMAND`, `WORKFLOW`
 2. **MCP server names**: Match the name in `mcp-settings.toml` (e.g., `mcp-fetch`, `filesystem`)
 3. **Plugin/MCP runner schemas**: Query via RunnerService or FunctionService gRPC APIs to get the latest settings/arguments definitions
 4. **`using` parameter**: Required for `LLM` (`chat`/`completion`), optional for `WORKFLOW` (`run` default, `create`) and `GRPC` (`unary` default, `streaming`), and used for multi-tool MCP servers
