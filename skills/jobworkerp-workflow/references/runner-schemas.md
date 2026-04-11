@@ -213,16 +213,20 @@ Output fields: `statusCode`, `headers`, `content` (string body)
 
 ---
 
-## GRPC_UNARY Runner
+## GRPC Runner (Unified, Multi-Method)
 
-### Settings (GrpcUnaryRunnerSettings)
+The `GRPC` runner supports two methods via `using`:
+- `using: unary` - Unary gRPC call (default)
+- `using: streaming` - Server-streaming gRPC call
+
+### Settings (GrpcRunnerSettings)
 
 ```yaml
 settings:
   host: "grpc.example.com"           # REQUIRED - Host
   port: 50051                         # REQUIRED - Port
   tls: true                           # Optional - Use TLS
-  timeoutMs: 5000                     # Optional - Timeout (ms)
+  connectionTimeout: 5000             # Optional - Connection timeout (ms)
   maxMessageSize: 4194304             # Optional - Max message size (bytes)
   authToken: "token"                  # Optional - Auth token
   useReflection: true                 # Optional - Use gRPC reflection
@@ -231,23 +235,33 @@ settings:
     clientCertPath: "/path/client.pem"
     clientKeyPath: "/path/client-key.pem"
     serverNameOverride: "hostname"
+  method: "service/MethodName"        # Optional - Default gRPC method
+  metadata:                           # Optional - Default metadata
+    authorization: "Bearer token"
+  timeout: 5000                       # Optional - Default request timeout (ms)
+  asJson: true                        # Optional - Default JSON conversion
 ```
 
-### Arguments (GrpcUnaryArgs)
+### Arguments for `using: unary` or `using: streaming` (GrpcArgs)
 
 ```yaml
+using: unary  # Optional (default). Use streaming for server-streaming RPCs.
 arguments:
-  method: "service/MethodName"        # REQUIRED - Full method name
-  request: '{"field": "value"}'       # REQUIRED - JSON request payload
+  method: "service/MethodName"        # Optional if settings.method is set
+  jsonBody: '{"field": "value"}'      # Use with reflection mode
+  # OR
+  body: "${.serialized_request}"      # Raw protobuf bytes for non-reflection mode
   metadata:                           # Optional - gRPC metadata
     authorization: "Bearer token"
   timeout: 5000                       # Optional - Timeout (ms)
   asJson: true                        # Optional - Convert response to JSON
 ```
 
-### Result (GrpcUnaryResult)
+### Result
 
-Output fields: `metadata`, `body`, `code`, `message`, `jsonBody`
+`using: unary` result fields: `metadata`, `body`, `code`, `message`, `jsonBody`
+
+`using: streaming` result fields: `metadata`, `code`, `message`, and either `jsonBody` or `bodies.items`
 
 ---
 

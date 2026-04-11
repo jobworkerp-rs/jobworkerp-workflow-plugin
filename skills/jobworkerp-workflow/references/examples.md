@@ -645,24 +645,25 @@ Key patterns:
 - **Result access**: `stdout`, `stderr`, `exitCode` available in output (same as COMMAND)
 - **`settings.fromImage`** vs **`arguments.image`**: settings is for worker initialization (image pull), arguments is per-job (only effective when `useStatic: false`)
 
-## 18. GRPC_UNARY Runner - gRPC API Calls
+## 18. GRPC Runner - gRPC API Calls
 
-Call gRPC services from a workflow. Useful for microservice communication.
+Call gRPC services from a workflow. Use `using: unary` for regular RPCs and `using: streaming` for server-streaming RPCs.
 
 ```yaml
 - CallGrpcService:
     run:
       runner:
-        name: GRPC_UNARY
+        name: GRPC
+        using: unary
         settings:
           host: "${$workflow.input.grpc_host}"
           port: 50051
           tls: false
-          timeoutMs: 10000
+          connectionTimeout: 10000
           useReflection: true        # Use gRPC reflection for dynamic message construction
         arguments:
           method: "mypackage.MyService/GetData"
-          request: |
+          jsonBody: |
             $${{"id": "{{ item_id }}", "include_details": true}}
           metadata:
             authorization: "$${Bearer {{ env.API_TOKEN }}}"
@@ -677,10 +678,11 @@ Call gRPC services from a workflow. Useful for microservice communication.
 ```
 
 Key patterns:
-- **`useReflection: true`**: Enables dynamic message construction from JSON (otherwise `request` must be base64-encoded protobuf)
+- **`useReflection: true`**: Enables dynamic message construction from `jsonBody` (otherwise pass raw protobuf bytes via `body`)
 - **`asJson: true`**: Converts protobuf response to JSON in `jsonBody` field
 - **`method` format**: `"package.Service/Method"` - full gRPC method path
-- **Result fields**: `code` (gRPC status, 0=OK), `jsonBody` (if asJson), `body` (raw bytes), `metadata`, `message`
+- **Result fields**: `code` (gRPC status, 0=OK), `jsonBody` (if asJson), `body` (unary raw bytes), `metadata`, `message`
+- **Streaming RPCs**: Switch to `using: streaming`; the collected result returns `jsonBody` or `bodies.items`
 
 ## 19. PYTHON_COMMAND Runner - Python Script Execution
 
@@ -759,7 +761,6 @@ Inline sub-workflow execution:
     run:
       runner:
         name: WORKFLOW
-        using: run
         settings:
           workflowUrl: "${$workflow.input.sub_workflow_path}"
         arguments:

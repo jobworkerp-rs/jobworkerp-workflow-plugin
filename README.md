@@ -5,7 +5,7 @@ A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin that help
 ## Features
 
 - Workflow YAML creation and editing with schema-aware guidance
-- Built-in runner support: COMMAND, LLM, HTTP_REQUEST, GRPC_UNARY, DOCKER, PYTHON_COMMAND, WORKFLOW, SLACK_POST_MESSAGE
+- Built-in runner support: COMMAND, LLM, HTTP_REQUEST, GRPC, DOCKER, PYTHON_COMMAND, WORKFLOW, SLACK_POST_MESSAGE
 - MCP server integration patterns
 - Plugin runner usage guidance
 - Flow control: forTask, forkTask, switchTask, tryTask, doTask, setTask, raiseTask, waitTask

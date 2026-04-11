@@ -3,7 +3,7 @@ name: jobworkerp-workflow
 description: >-
   Create and edit workflow YAML compliant with jobworkerp-rs Custom Serverless Workflow DSL v1.0.0.
   Use when the user requests creating workflow definitions, modifying existing workflows, or understanding workflow structure.
-  Supports task execution with runners (COMMAND, LLM, HTTP_REQUEST, GRPC_UNARY, DOCKER, PYTHON_COMMAND, WORKFLOW, MCP servers, Plugins),
+  Supports task execution with runners (COMMAND, LLM, HTTP_REQUEST, GRPC, DOCKER, PYTHON_COMMAND, WORKFLOW, MCP servers, Plugins),
   for loops, fork parallel execution, switch conditional branching, try-catch error handling,
   and jq/Liquid variable expansion.
 ---
@@ -152,6 +152,20 @@ name: mcp-fetch           # Server name from mcp-settings.toml
 using: fetch_html          # Tool name (for multi-tool servers)
 arguments:
   argJson: '{"url": "https://example.com"}'
+```
+
+### GRPC (using: unary by default)
+```yaml
+name: GRPC
+using: unary
+settings:
+  host: "grpc.example.com"
+  port: 50051
+  useReflection: true
+arguments:
+  method: "mypackage.MyService/GetData"
+  jsonBody: '{"id":"123"}'
+  asJson: true
 ```
 
 ### WORKFLOW (Nested)
@@ -306,11 +320,11 @@ See [Runner Schemas](references/runner-schemas.md) for full details on the query
 
 ## Important Notes
 
-1. **Runner names are case-sensitive**: `COMMAND`, `LLM`, `HTTP_REQUEST`, `GRPC_UNARY`, `DOCKER`, `PYTHON_COMMAND`, `SLACK_POST_MESSAGE`, `WORKFLOW`
+1. **Runner names are case-sensitive**: `COMMAND`, `LLM`, `HTTP_REQUEST`, `GRPC`, `DOCKER`, `PYTHON_COMMAND`, `SLACK_POST_MESSAGE`, `WORKFLOW`
 2. **MCP server names**: Match the name in `mcp-settings.toml` (e.g., `mcp-fetch`, `filesystem`)
 3. **Plugin/MCP runner schemas**: Query via RunnerService or FunctionService gRPC APIs to get the latest settings/arguments definitions
-4. **`using` parameter**: Required for multi-method runners (LLM: `chat`/`completion`, WORKFLOW: `run`/`create`) and multi-tool MCP servers
-5. **Deprecated runners**: Do NOT use `LLM_COMPLETION`, `LLM_CHAT`, `INLINE_WORKFLOW`, `REUSABLE_WORKFLOW`, `CREATE_WORKFLOW`. Use `LLM` or `WORKFLOW` with `using` instead.
+4. **`using` parameter**: Required for `LLM` (`chat`/`completion`), optional for `WORKFLOW` (`run` default, `create`) and `GRPC` (`unary` default, `streaming`), and used for multi-tool MCP servers
+5. **Deprecated runners**: Do NOT use `GRPC_UNARY`, `LLM_COMPLETION`, `LLM_CHAT`, `INLINE_WORKFLOW`, `REUSABLE_WORKFLOW`, `CREATE_WORKFLOW`. Use `GRPC`, `LLM`, or `WORKFLOW` with `using` instead.
 6. **Settings field names**: Use camelCase in YAML (matching JSON protobuf serialization), e.g., `baseUrl`, `pullModel`, `maxTokens`
 7. **Streaming**: Set `useStreaming: true` on runTask for LLM or long-running tasks that benefit from progress monitoring
 8. **Schema validation**: Full JSON Schema validation is disabled by default. Enable with `WORKFLOW_ENABLE_FULL_SCHEMA_VALIDATION=true` env var.
