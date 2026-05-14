@@ -2,6 +2,8 @@
 
 Each runner's `settings` and `arguments` in workflow YAML correspond to JSON representations of their protobuf definitions. Field names use camelCase in JSON.
 
+**For the workflow DSL itself** (top-level shape, task types, taskBase properties), the canonical JSON Schema is bundled at [`workflow-schema.yaml`](workflow-schema.yaml). This file covers everything *outside* the per-runner `settings`/`arguments` — those are documented below and queryable via gRPC at runtime.
+
 **Note on runtime expressions in settings/arguments:** Each value must be entirely a runtime expression (`${...}` or `$${...}`) or entirely a plain literal. You cannot mix plain text with expressions in a single value (e.g., `"Bearer ${env.TOKEN}"` is **invalid**). Use Liquid `$${Bearer {{ env.TOKEN }}}` or jq `${"Bearer " + env.TOKEN}` instead. See [Schema Reference](schema-reference.md#runtime-expressions) for details.
 
 ## Querying Runner Schemas at Runtime

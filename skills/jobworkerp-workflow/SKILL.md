@@ -17,6 +17,7 @@ Skill for creating and editing workflow YAML compliant with jobworkerp-rs Custom
 - **[Schema Reference](references/schema-reference.md)**: Full workflow schema structure, all task types, runtime expression syntax
 - **[Runner Schemas](references/runner-schemas.md)**: Settings/arguments JSON for each runner (COMMAND, LLM, HTTP_REQUEST, etc.)
 - **[Examples](references/examples.md)**: Real workflow patterns from the project
+- **[workflow-schema.yaml](references/workflow-schema.yaml)**: Authoritative JSON Schema (Draft 2020-12) for the workflow DSL — bundled copy of jobworkerp-rs `runner/schema/workflow.yaml`. Consult this when validating field names, enum values, or exact type definitions.
 
 ## Workflow Basics
 
@@ -261,6 +262,44 @@ Inside `output.as`, `$input` refers to the task's input (data before execution):
       items: ${$items + ["new"]}
 ```
 
+## Pitfall: `if: false` Skips the *Entire* Task — Including `export.as`
+
+Per Serverless Workflow v1.0.0 §Tasks, when a task's `if` condition evaluates to false the task is **skipped**: the `run`/`do`/`set` body, `output.as`, **and `export.as` are all bypassed**, and the raw task input passes through as the task's output unchanged.
+
+This is spec-compliant but easy to miss. A common bug:
+
+```yaml
+# BROKEN — if no existing thread, $threadId is never exported.
+- LookupThread:
+    run: ...                       # produces { id: "..." } or null
+    export:
+      as:
+        threadId: ${.id}
+- CreateThread:
+    if: ${$threadId == null}       # only runs when lookup found nothing
+    run: ...                       # produces { newId: "..." }
+    export:
+      as:
+        threadId: ${.newId}        # SKIPPED when if=false → $threadId may be unset
+- UseThread:
+    run:
+      arguments:
+        thread: ${$threadId}       # silently sees seed/undefined when lookup hit
+```
+
+**Fix**: follow up with an unconditional `set` task that resolves the value via jq's `//` (null-coalescing) fallback. This guarantees the variable is populated regardless of which branch executed.
+
+```yaml
+- ResolveThreadId:
+    set:
+      threadId: ${$existingThreadId // $createdThreadId}
+    export:
+      as:
+        threadId: ${.threadId}
+```
+
+When a downstream task depends on a variable that may be set by either of two `if`-gated branches, **always** add a `set` resolver task. See `workflows/news2/news-summarize-read.yml` (`ResolveThreadId`) and `memories/workflows/thread-summary/thread-summary-single.yaml` (`resolveMemoryThreadId`) in jobworkerp-rs for canonical patterns.
+
 ## Common Patterns
 
 ### Null-safe Guard Condition
@@ -294,7 +333,9 @@ onError: continue    # Skip failures, process remaining items
 
 See [Examples](references/examples.md) for more comprehensive patterns with full context.
 
-## Discovering Runner Schemas
+## Discovering Workflow and Runner Schemas
+
+For the workflow DSL itself (top-level structure, task types, common properties), the canonical JSON Schema is bundled at [`references/workflow-schema.yaml`](references/workflow-schema.yaml). Use it as the source of truth when you need to verify a field name, enum value, or whether a property is required.
 
 For any runner (built-in, MCP server, or plugin), query the gRPC services to get the latest settings/arguments schema:
 
@@ -320,6 +361,6 @@ See [Runner Schemas](references/runner-schemas.md) for full details on the query
 5. **Deprecated runners**: Do NOT use `GRPC_UNARY`, `LLM_COMPLETION`, `LLM_CHAT`, `INLINE_WORKFLOW`, `REUSABLE_WORKFLOW`, `CREATE_WORKFLOW`. Use `GRPC`, `LLM`, or `WORKFLOW` with `using` instead.
 6. **Settings field names**: Use camelCase in YAML (matching JSON protobuf serialization), e.g., `baseUrl`, `pullModel`, `maxTokens`
 7. **Streaming**: Set `useStreaming: true` on runTask for LLM or long-running tasks that benefit from progress monitoring
-8. **Schema validation**: Full JSON Schema validation is disabled by default. Enable with `WORKFLOW_ENABLE_FULL_SCHEMA_VALIDATION=true` env var.
-9. **Schema file**: The authoritative schema is at `runner/schema/workflow.yaml` (932 lines)
+8. **Schema validation**: Full JSON Schema validation is **enabled by default**. Set `WORKFLOW_SKIP_SCHEMA_VALIDATION=true` to skip (errors are logged only). Plugin runners must still validate their own inputs — workflow-level validation is intentionally lightweight for plugins.
+9. **Schema file**: A copy of the authoritative schema is bundled at [`references/workflow-schema.yaml`](references/workflow-schema.yaml) (946 lines, mirrored from jobworkerp-rs `runner/schema/workflow.yaml`). Sync manually when the upstream schema changes.
 10. **Workflow docs**: See `WORKFLOW.md` (English) or `WORKFLOW_ja.md` (Japanese) for usage documentation

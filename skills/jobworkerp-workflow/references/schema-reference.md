@@ -2,6 +2,8 @@
 
 Custom Serverless Workflow DSL v1.0.0 for jobworkerp-rs.
 
+This document is the quick reference. For the authoritative, machine-checkable definition (every required field, enum, pattern, and constraint), see [`workflow-schema.yaml`](workflow-schema.yaml) — a JSON Schema (Draft 2020-12) bundled with this skill and mirrored from jobworkerp-rs `runner/schema/workflow.yaml`.
+
 ## Top-Level Structure
 
 ```yaml
@@ -177,6 +179,23 @@ Variables set here are accessible as `$myVar` in jq or `{{ myVar }}` in Liquid.
     checkpoint: false   # Save state for checkpoint/restart
     metadata: {}        # Additional metadata
 ```
+
+### `if: false` skips the whole task (including `export.as`)
+
+When `if` evaluates to false, Serverless Workflow v1.0.0 skips the task entirely: `run`/`do`/`set`, `output.as`, **and `export.as`** are all bypassed, and the raw input passes through as the task's output. A context variable that you expected an `if`-gated task to populate via `export.as` will silently remain at its seed value (or undefined).
+
+When a variable must be populated regardless of which branch ran, follow up with an unconditional `set` task using jq's `//` fallback:
+
+```yaml
+- ResolveThreadId:
+    set:
+      threadId: ${$existingThreadId // $createdThreadId}
+    export:
+      as:
+        threadId: ${.threadId}
+```
+
+See SKILL.md "Pitfall: `if: false` Skips the *Entire* Task" for a full bug→fix walk-through.
 
 ## runTask Execution Methods
 

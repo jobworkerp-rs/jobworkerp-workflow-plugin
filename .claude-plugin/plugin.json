@@ -1,6 +1,6 @@
 {
   "name": "jobworkerp-workflow",
-  "description": "Create and edit workflow YAML compliant with jobworkerp-rs Custom Serverless Workflow DSL v1.0.0. Supports built-in runners (COMMAND, LLM, HTTP_REQUEST, GRPC_UNARY, DOCKER, PYTHON_COMMAND, WORKFLOW, SLACK_POST_MESSAGE), MCP servers, plugin runners, flow control (for, fork, switch, try-catch), and jq/Liquid runtime expressions.",
+  "description": "Create and edit workflow YAML compliant with jobworkerp-rs Custom Serverless Workflow DSL v1.0.0. Supports built-in runners (COMMAND, LLM, HTTP_REQUEST, GRPC, DOCKER, PYTHON_COMMAND, WORKFLOW), MCP servers, plugin runners, flow control (for, fork, switch, try-catch), and jq/Liquid runtime expressions.",
   "version": "1.0.0",
   "author": {
     "name": "sutr",

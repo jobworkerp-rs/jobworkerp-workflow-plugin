@@ -62,6 +62,7 @@ Example prompts:
 | `references/schema-reference.md` | Full schema structure, all task types, runtime expression syntax |
 | `references/runner-schemas.md` | Settings/arguments for all built-in runners |
 | `references/examples.md` | Pattern examples: LLM chat, for loops, MCP integration, etc. |
+| `references/workflow-schema.yaml` | Authoritative JSON Schema (Draft 2020-12) for the workflow DSL — mirrored from jobworkerp-rs `runner/schema/workflow.yaml`. Sync manually when the upstream schema changes. |
 
 ## Related Projects
 
