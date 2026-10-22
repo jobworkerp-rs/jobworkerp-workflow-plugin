@@ -1,0 +1,21 @@
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: call-grpc
+  version: "0.0.1"
+
+do:
+  - getUser:
+      call: grpc
+      with:
+        service:
+          name: example.UserService
+          host: localhost
+          port: 50051
+        method: GetUser
+        arguments:
+          id: ${.userId}
+      output:
+        as:
+          user: ${.body}
+          grpcCode: ${.code}

@@ -1,117 +1,174 @@
 ---
 name: jobworkerp-workflow
 description: >-
-  Create and edit workflow YAML compliant with jobworkerp-rs Custom Serverless Workflow DSL v1.0.0.
+  Create and edit workflow YAML for the jobworkerp-rs workflow DSL (based on Open Workflow DSL v1.0.0 with jobworkerp extensions).
   Use when the user requests creating workflow definitions, modifying existing workflows, or understanding workflow structure.
-  Supports task execution with runners (COMMAND, LLM, HTTP_REQUEST, GRPC, DOCKER, PYTHON_COMMAND, WORKFLOW, MCP servers, Plugins),
-  for loops, fork parallel execution, switch conditional branching, try-catch error handling,
+  Supports runner/worker/function execution (COMMAND, LLM, HTTP_REQUEST, GRPC, DOCKER, PYTHON_COMMAND, WORKFLOW, SANDBOX, MCP servers, Plugins),
+  run.shell/run.container/run.script/run.workflow process tasks, call http/grpc tasks with secret-based authentication,
+  for loops, fork parallel execution, switch branching, try-catch error handling, timeouts,
   and jq/Liquid variable expansion.
 ---
 
-# Workflow YAML Creator
+# jobworkerp Workflow YAML Creator
 
-Skill for creating and editing workflow YAML compliant with jobworkerp-rs Custom Serverless Workflow DSL v1.0.0.
+Skill for creating and editing workflow YAML for jobworkerp-rs. The DSL adopts the flow-control and logic parts of [Open Workflow DSL v1.0.0](https://github.com/open-workflow-specification/specification/blob/v1.0.0/dsl.md) and extends them for the jobworkerp job platform.
 
 ## Reference Files
 
-- **[Schema Reference](references/schema-reference.md)**: Full workflow schema structure, all task types, runtime expression syntax
-- **[Runner Schemas](references/runner-schemas.md)**: Settings/arguments JSON for each runner (COMMAND, LLM, HTTP_REQUEST, etc.)
-- **[Examples](references/examples.md)**: Real workflow patterns from the project
-- **[workflow-schema.yaml](references/workflow-schema.yaml)**: Authoritative JSON Schema (Draft 2020-12) for the workflow DSL — bundled copy of jobworkerp-rs `runner/schema/workflow.yaml`. Consult this when validating field names, enum values, or exact type definitions.
+- **[Schema Reference](references/schema-reference.md)**: All task types, `use` (timeouts / authentications / secrets), run/call variants, timeouts, error handling, runtime expressions
+- **[Runner Schemas](references/runner-schemas.md)**: Settings/arguments/results for each runner (COMMAND, LLM, HTTP_REQUEST, GRPC, ...)
+- **[Examples](references/examples.md)**: Workflow patterns
+- **[workflow-schema.yaml](references/workflow-schema.yaml)**: Human-readable JSON Schema (Draft 2020-12) mirrored from jobworkerp-rs `runner/schema/workflow.yaml`
+- **[workflow-validation-schema.json](references/workflow-validation-schema.json)**: The schema the jobworkerp-rs runtime validator actually uses (`runner/schema/workflow_minimal_fix.json`). Validate a workflow with `check-jsonschema --schemafile references/workflow-validation-schema.json my-workflow.yaml`
 
 ## Workflow Basics
 
 ### Top-Level Structure
 
-Every workflow YAML requires three top-level keys:
+Only `document` and `do` are required.
 
 ```yaml
-document:              # Metadata
-  dsl: "0.0.1"         # DSL version
-  namespace: default    # Namespace
-  name: my-workflow     # Workflow name
-  version: "0.0.1"     # Version
-input:                 # Input configuration
-  schema:              # Optional validation schema
+document:              # REQUIRED - metadata
+  dsl: "0.0.1"
+  namespace: default
+  name: my-workflow
+  version: "0.0.1"
+input:                 # Optional - input schema / input.from transform
+  schema:
     document:
       type: object
-      properties: ...
-do:                    # Task list (ordered)
+      properties: {}
+use:                   # Optional - reusable components
+  timeouts: {}         #   named timeouts, referenced as `timeout: <name>`
+  authentications: {}  #   named bearer/basic policies for call tasks
+  secrets: []          #   declared secret names (values come from env)
+timeout:               # Optional - whole-workflow timeout (no default)
+  after: { hours: 1 }
+do:                    # REQUIRED - ordered task list
   - TaskName:
       ...
-output:                # Optional output transformation
+output:                # Optional - output transformation
   as: "${...}"
 ```
+
+When `input` is omitted the runtime input is passed to the tasks unchanged.
 
 ### Task Types Overview
 
 | Task | Purpose | Key Properties |
 |------|---------|---------------|
-| **runTask** | Execute runners/workers/scripts | `run.runner`, `run.worker`, `run.function`, `run.script` |
-| **forTask** | Iterate over collection | `for.each`, `for.in`, `do`, `inParallel` |
-| **forkTask** | Concurrent execution | `fork.branches`, `fork.compete` |
-| **doTask** | Sequential subtask group | `do` (nested task list) |
+| **runTask** | Execute a job | `run.runner` / `run.function` / `run.worker` / `run.script` / `run.shell` / `run.container` / `run.workflow` |
+| **callTask** | Call an HTTP or gRPC service | `call: http\|grpc`, `with` |
+| **forTask** | Iterate over a collection | `for.each`, `for.in`, `do`, `inParallel`, `onError` |
+| **forkTask** | Concurrent branches | `fork.branches`, `fork.compete` |
+| **doTask** | Sequential subtask group | `do` |
 | **switchTask** | Conditional branching | `switch[].when`, `switch[].then` |
-| **tryTask** | Error handling | `try`, `catch.retry`, `catch.do` |
-| **setTask** | Set context variables | `set` (key/value pairs) |
-| **raiseTask** | Raise error | `raise.error` (type, status) |
+| **tryTask** | Error handling | `try`, `catch.errors`, `catch.retry`, `catch.do` |
+| **setTask** | Set context variables | `set` |
+| **raiseTask** | Raise (or rethrow) an error | `raise.error` |
 | **waitTask** | Pause execution | `wait` (duration) |
 
 ### Common Task Properties (taskBase)
 
-All tasks support these optional properties:
-
+<!-- validate:skip -->
 ```yaml
 - AnyTask:
-    if: "${condition}"      # Conditional execution
+    if: "${condition}"      # Skip the whole task (incl. output/export) when false
     input:
-      from: "${transform}"  # Transform input
+      from: "${transform}"
     output:
-      as:                   # Transform output (string or object)
+      as:                   # string or object
         key: "${.value}"
     export:
-      as:                   # Export to context variables
+      as:                   # write context variables
         varName: "${.data}"
-    timeout:
+    timeout:                # Optional; inline or the name of a use.timeouts entry
       after: { seconds: 30 }
-    then: continue          # Flow directive: continue|exit|end|wait|"TaskName"
-    checkpoint: false       # Save state for checkpoint/restart
+    then: continue          # continue|exit|end|wait|"TaskName"
+    checkpoint: false
 ```
 
-## runTask - The Most Common Task
+## runTask
 
-### runRunner (Primary Method)
+Each `run` holds exactly one execution form. `await` (default `true`) can be set on every form; `return` only on the process forms.
+
+| Form | Executes | `await` | `return` |
+|------|----------|:-:|:-:|
+| `run.runner` | Any runner by name, with settings/options | yes | no |
+| `run.function` | `runnerName` (+settings/options) or `workerName` | yes | no |
+| `run.worker` | Pre-configured worker | yes | no |
+| `run.workflow` | Nested workflow (`workflowUrl` / `workflowData`) | yes | no |
+| `run.shell` | Command (COMMAND runner) | yes | yes |
+| `run.container` | Container (DOCKER runner) | yes | yes |
+| `run.script` | Inline/external script (PYTHON_COMMAND runner) | yes | yes |
+
+- `await: false` enqueues fire-and-forget and passes the task input through as output. Rejected together with `useStreaming: true`.
+- `return` for process forms: `stdout` (default, raw string — never auto-parsed as JSON), `stderr`, `code`, `all` (`{code, stdout, stderr}`), `none`.
+
+### run.runner (most flexible)
 
 ```yaml
 - MyTask:
     run:
       runner:
-        name: COMMAND              # Runner name (REQUIRED)
-        using: "chat"              # Method for multi-method runners (optional)
+        name: COMMAND              # REQUIRED
         settings: {}               # Runner initialization settings
-        arguments: {}              # Job arguments (REQUIRED)
-        options:                   # Worker options
+        arguments:                 # REQUIRED
+          command: echo
+          args: ["Hello"]
+        options:                   # Worker options (inside `runner`, not under `run`)
           channel: workflow
           useStatic: false
           storeSuccess: true
           storeFailure: true
-          broadcastResults: false
           queueType: NORMAL        # NORMAL|WITH_BACKUP|DB_ONLY
           responseType: DIRECT     # DIRECT|NO_RESULT
-      return: stdout               # stdout|stderr|code|all|none
-    useStreaming: false             # Enable streaming execution
+    useStreaming: false            # Stream intermediate results (LLM etc.)
 ```
 
-### runFunction (Alternative)
+Add `using: <method>` inside `runner` for multi-method runners (LLM, GRPC, WORKFLOW, SANDBOX, multi-tool MCP servers).
+
+### Process forms (shell / container / workflow)
 
 ```yaml
-run:
-  function:
-    runnerName: COMMAND      # Use runner by name
-    # OR
-    workerName: "MyWorker"   # Use pre-configured worker
-    arguments: {}            # REQUIRED
+- ListDir:
+    run:
+      shell:
+        command: ls
+        args: ["-la", "${.dir}"]
+      return: all                  # {code, stdout, stderr}
+- InContainer:
+    run:
+      container:
+        image: alpine:3.20
+        command: ["echo", "hello"]
+- Child:
+    run:
+      workflow:
+        workflowUrl: ./child.yaml
+        input: { value: 1 }
 ```
+
+- `run.shell` / `run.container` do **not** fail on a non-zero exit by default; set `treatNonzeroAsError: true` (optionally with `successExitCodes`).
+- `run.script` always fails on a non-zero exit and does not support `useStreaming: true`.
+
+See [Schema Reference](references/schema-reference.md#runtask) for all fields.
+
+## callTask
+
+```yaml
+- GetRepo:
+    call: http
+    with:
+      method: get
+      endpoint:
+        uri: https://api.github.com/repos/jobworkerp-rs/jobworkerp-rs
+        authentication:
+          use: github              # policy declared under use.authentications
+      output: response             # content (default) | response
+```
+
+`call: grpc` takes `service` (name/host/port), `method`, `arguments` (requires server reflection). Secret values are never written in YAML: declare names under `use.secrets` and supply `WORKFLOW_SECRET_<UPPER_SNAKE_NAME>` env vars. See [Schema Reference](references/schema-reference.md#calltask).
 
 ## Runner Quick Reference
 
@@ -124,100 +181,84 @@ arguments:
   treatNonzeroAsError: true
 ```
 
-### LLM (using: chat - Recommended)
+### LLM (`using` is REQUIRED: `chat` | `completion` | `embedding` | `token_count`)
 ```yaml
 name: LLM
 using: chat
 settings:
-  ollama: { baseUrl: "http://...", model: "model-name", pullModel: false }
-  # OR genai: { model: "gpt-4o" }  # Requires API key env var
+  ollama: { baseUrl: "http://localhost:11434", model: "model-name", pullModel: false }
+  # OR genai: { model: "gpt-4o" }   # API key via env var; for OpenAI-compatible servers include /v1/ in baseUrl
 arguments:
   messages:
     - role: system
       content: { text: "System prompt" }
     - role: user
       content: { text: "User message" }
-  options: { maxTokens: 131072, temperature: 0.3, extractReasoningContent: true }
+  options: { maxTokens: 8192, temperature: 0.3, reasoningEffort: "low" }
 ```
 
 ### HTTP_REQUEST
 ```yaml
 name: HTTP_REQUEST
 settings: { baseUrl: "https://api.example.com" }
-arguments: { method: "GET", path: "/data", headers: [{ key: "Auth", value: "Bearer ..." }] }
+arguments: { method: "GET", path: "/data", headers: [{ key: "Accept", value: "application/json" }] }
 ```
+(Prefer `call: http` for plain REST calls that need authentication.)
 
 ### MCP Servers
 ```yaml
 name: mcp-fetch           # Server name from mcp-settings.toml
-using: fetch_html          # Tool name (for multi-tool servers)
-arguments:
-  argJson: '{"url": "https://example.com"}'
+using: fetch              # Tool name (required when the server has several tools)
+arguments:                # The tool's own input fields, written directly
+  url: "https://example.com"
+  max_length: 5000
 ```
 
-### GRPC (using: unary by default)
+### GRPC (`using: unary` default, or `streaming`)
 ```yaml
 name: GRPC
 using: unary
-settings:
-  host: "grpc.example.com"
-  port: 50051
-  useReflection: true
+settings: { host: "grpc.example.com", port: 50051, useReflection: true }
 arguments:
   method: "mypackage.MyService/GetData"
   jsonBody: '{"id":"123"}'
   asJson: true
 ```
 
-### WORKFLOW (Nested)
-```yaml
-name: WORKFLOW
-using: run
-settings: { workflowUrl: "./sub-workflow.yaml" }
-arguments: { input: '{"key": "value"}' }
-```
+### WORKFLOW
+Prefer `run.workflow` for nesting. Use the runner form for `using: create` (register a workflow as a worker). See [Runner Schemas](references/runner-schemas.md#workflow-runner-unified-multi-method).
 
-See [Runner Schemas](references/runner-schemas.md) for complete settings/arguments for all runners.
+See [Runner Schemas](references/runner-schemas.md) for complete settings/arguments of every runner (including DOCKER, PYTHON_COMMAND, SANDBOX).
 
 ## Runtime Expressions
 
-**IMPORTANT**: A value must be **entirely** a runtime expression or entirely plain text. You cannot mix plain text with `${...}` or `$${...}`. To combine static text with dynamic values, use Liquid `$${...}` (text interpolation) or jq `${"static " + .dynamic}` (string concatenation).
+**IMPORTANT**: A value must be **entirely** a runtime expression or entirely plain text. You cannot mix plain text with `${...}` or `$${...}`. To combine static text with dynamic values, use Liquid `$${...}` or jq string concatenation `${"static " + .dynamic}`.
 
 ### jq syntax: `${...}`
 
-Best for JSON data manipulation and computation.
-
 ```yaml
-"${.field}"                     # Access current data field
-"${$contextVar}"                # Access context variable (set by setTask/export)
-"${$workflow.input.key}"        # Access workflow input
-"${$input.field}"               # Access task input (in output.as)
-"${$task.output}"               # Access task output
-"${env.ENV_VAR}"                # Access environment variable
-"${now | strftime(\"%Y-%m-%d\")}"  # Date formatting
-"${.items | map(.name)}"       # Array operations
-"${if .x then .y else .z end}" # Conditional
-"${.text // \"default\"}"      # Null coalescing (alternative operator)
-"${.text | gsub(\"old\"; \"new\")}"  # String operations
+"${.field}"                     # Current data field
+"${$contextVar}"                # Context variable (set / export / workflow_context)
+"${$workflow.input.key}"        # Workflow input
+"${$input.field}"               # Task input (inside output.as)
+"${env.ENV_VAR}"                # Environment variable (jq only)
+"${now | strftime(\"%Y-%m-%d\")}"
+"${.items | map(.name)}"
+"${.text // \"default\"}"
 ```
 
 ### Liquid syntax: `$${...}`
 
-Best for string templating and mixed text+data.
-
 ```yaml
-"$${{{ variable }}}"                           # Variable interpolation
-"$${% if condition %}yes{% else %}no{% endif %}"  # Conditional
-"$${{{ 'now' | date: '%Y-%m-%d' }}}"           # Date
-"$${{{ text | url_encode }}}"                  # URL encode
-"$${{{ data | json_encode }}}"                 # JSON encode
+"$${{{ variable }}}"
+"$${% if condition %}yes{% else %}no{% endif %}"
+"$${{{ 'now' | date: '%Y-%m-%d' }}}"
+"$${{{ data | json_encode }}}"
 ```
 
-### When to Use Which
-
-- **jq `${}`**: JSON transformation, arithmetic, filtering, complex data manipulation
-- **Liquid `$${}**`: String construction with embedded variables, conditional text blocks, date formatting in paths
-- **Key rule**: jq for data, Liquid for text/templates
+- **jq** for data transformation, **Liquid** for text templating.
+- Liquid **cannot** read environment variables — use jq (`${"Bearer " + env.TOKEN}`) or, for call tasks, `use.secrets`.
+- `fromjson` fails on Markdown fences (```` ```json ````). Strip fences from LLM output before parsing.
 
 ## Data Flow Pattern
 
@@ -225,69 +266,34 @@ Best for string templating and mixed text+data.
 input.from → [Task Execution] → output.as → export.as → next task
 ```
 
-### Preserving Data Through Steps with $input
-
-Inside `output.as`, `$input` refers to the task's input (data before execution):
+Inside `output.as`, `$input` is the task input, so you can carry fields forward:
 
 ```yaml
 - Step1:
     run: ...        # Produces {content: {text: "summary"}}
     output:
       as:
-        title: ${$input.result.title}    # Preserve from input
-        summary: ${.content.text}        # New from this task's output
-- Step2:
-    run: ...        # Receives {title: "...", summary: "..."}
-    output:
-      as:
-        title: ${$input.title}           # Pass through
-        genre: ${.content.text}          # New from this task
-        summary: ${$input.summary}       # Pass through
+        title: ${$input.result.title}
+        summary: ${.content.text}
 ```
 
-### Context Variables with setTask + export
-
-```yaml
-- InitVars:
-    set:
-      counter: 0
-      items: []
-    export:
-      as:
-        counter: ${.counter}   # Now accessible as ${$counter}
-        items: ${.items}       # Now accessible as ${$items}
-- LaterStep:
-    set:
-      counter: ${$counter + 1}
-      items: ${$items + ["new"]}
-```
+A `set` task both writes context variables **and** replaces the current data with the set values. Use `export.as` to keep values available as `$name` without relying on the data flow.
 
 ## Pitfall: `if: false` Skips the *Entire* Task — Including `export.as`
 
-Per Serverless Workflow v1.0.0 §Tasks, when a task's `if` condition evaluates to false the task is **skipped**: the `run`/`do`/`set` body, `output.as`, **and `export.as` are all bypassed**, and the raw task input passes through as the task's output unchanged.
-
-This is spec-compliant but easy to miss. A common bug:
+When a task's `if` evaluates to false the task is skipped: the body, `output.as`, **and `export.as`** are bypassed, and the raw task input passes through unchanged. A variable you expected that task to export stays at its seed value (or is undefined, which makes a later `$var` reference fail).
 
 ```yaml
-# BROKEN — if no existing thread, $threadId is never exported.
-- LookupThread:
-    run: ...                       # produces { id: "..." } or null
-    export:
-      as:
-        threadId: ${.id}
+# BROKEN — when the lookup hits, CreateThread is skipped and never exports threadId.
 - CreateThread:
-    if: ${$threadId == null}       # only runs when lookup found nothing
-    run: ...                       # produces { newId: "..." }
+    if: ${$existingThreadId == null}
+    run: ...
     export:
       as:
-        threadId: ${.newId}        # SKIPPED when if=false → $threadId may be unset
-- UseThread:
-    run:
-      arguments:
-        thread: ${$threadId}       # silently sees seed/undefined when lookup hit
+        createdThreadId: ${.newId}
 ```
 
-**Fix**: follow up with an unconditional `set` task that resolves the value via jq's `//` (null-coalescing) fallback. This guarantees the variable is populated regardless of which branch executed.
+**Fix**: seed the variables up front and resolve them with an unconditional `set`:
 
 ```yaml
 - ResolveThreadId:
@@ -298,69 +304,43 @@ This is spec-compliant but easy to miss. A common bug:
         threadId: ${.threadId}
 ```
 
-When a downstream task depends on a variable that may be set by either of two `if`-gated branches, **always** add a `set` resolver task. See `workflows/news2/news-summarize-read.yml` (`ResolveThreadId`) and `memories/workflows/thread-summary/thread-summary-single.yaml` (`resolveMemoryThreadId`) in jobworkerp-rs for canonical patterns.
+Canonical patterns in jobworkerp-rs: `workflows/news2/news-summarize-read.yml` (`ResolveThreadId`) and `memories/agent-chat-import/workers/thread-summary/thread-summary-single.yaml` (`resolveMemoryThreadId`).
 
 ## Common Patterns
 
-### Null-safe Guard Condition
 ```yaml
+# Null-safe guard
 if: '${.content // "" | gsub("^\\s+|\\s+$"; "") | length > 0}'
-```
 
-### For Loop with Static Array
-```yaml
+# Static array iteration
 for:
   each: genre
   in: '${["ai_ml", "technology", "science"]}'
+
+# Error-resilient iteration
+onError: continue
 ```
 
-### Dynamic Strings with Liquid
-```yaml
-path: |-
-  $${
-  {%- assign year = 'now' | date: '%Y' -%}
-  {%- assign month = 'now' | date: '%m' -%}
-  {{ year }}/{{ month | prepend: '00' | slice: -2, 2 }}/{{ 'now' | date: '%d' }}}
-```
+See [Examples](references/examples.md) for complete patterns.
 
-### Error-Resilient Iteration
-```yaml
-for:
-  each: item
-  in: ${.items}
-onError: continue    # Skip failures, process remaining items
-```
+## Discovering Runner Schemas
 
-See [Examples](references/examples.md) for more comprehensive patterns with full context.
-
-## Discovering Workflow and Runner Schemas
-
-For the workflow DSL itself (top-level structure, task types, common properties), the canonical JSON Schema is bundled at [`references/workflow-schema.yaml`](references/workflow-schema.yaml). Use it as the source of truth when you need to verify a field name, enum value, or whether a property is required.
-
-For any runner (built-in, MCP server, or plugin), query the gRPC services to get the latest settings/arguments schema:
-
-- **RunnerService** (`FindByName`/`FindListBy`): Returns `RunnerData` with `runner_settings_proto` and `method_proto_map` (per-method `args_proto`, `result_proto`)
-- **FunctionService** (`FindByName`/`FindList`): Returns `FunctionSpecs` with JSON Schema versions (`settings_schema`, per-method `arguments_schema`, `result_schema`)
+For any runner (built-in, MCP server, or plugin), query the gRPC services for the latest schemas:
 
 ```bash
-# Get runner schema by name (works for built-in, MCP, and plugin runners)
 grpcurl -plaintext -d '{"name":"LLM"}' localhost:9000 jobworkerp.service.RunnerService/FindByName
-
-# Get JSON Schema version (more convenient for workflow authoring)
 grpcurl -plaintext -d '{"runner_name":"COMMAND"}' localhost:9000 jobworkerp.function.service.FunctionService/FindByName
 ```
 
-See [Runner Schemas](references/runner-schemas.md) for full details on the query APIs and built-in runner schemas.
+See [Runner Schemas](references/runner-schemas.md#querying-runner-schemas-at-runtime).
 
 ## Important Notes
 
-1. **Runner names are case-sensitive**: `COMMAND`, `LLM`, `HTTP_REQUEST`, `GRPC`, `DOCKER`, `PYTHON_COMMAND`, `WORKFLOW`
-2. **MCP server names**: Match the name in `mcp-settings.toml` (e.g., `mcp-fetch`, `filesystem`)
-3. **Plugin/MCP runner schemas**: Query via RunnerService or FunctionService gRPC APIs to get the latest settings/arguments definitions
-4. **`using` parameter**: Required for `LLM` (`chat`/`completion`), optional for `WORKFLOW` (`run` default, `create`) and `GRPC` (`unary` default, `streaming`), and used for multi-tool MCP servers
-5. **Deprecated runners**: Do NOT use `GRPC_UNARY`, `LLM_COMPLETION`, `LLM_CHAT`, `INLINE_WORKFLOW`, `REUSABLE_WORKFLOW`, `CREATE_WORKFLOW`. Use `GRPC`, `LLM`, or `WORKFLOW` with `using` instead.
-6. **Settings field names**: Use camelCase in YAML (matching JSON protobuf serialization), e.g., `baseUrl`, `pullModel`, `maxTokens`
-7. **Streaming**: Set `useStreaming: true` on runTask for LLM or long-running tasks that benefit from progress monitoring
-8. **Schema validation**: Full JSON Schema validation is **enabled by default**. Set `WORKFLOW_SKIP_SCHEMA_VALIDATION=true` to skip (errors are logged only). Plugin runners must still validate their own inputs — workflow-level validation is intentionally lightweight for plugins.
-9. **Schema file**: A copy of the authoritative schema is bundled at [`references/workflow-schema.yaml`](references/workflow-schema.yaml) (946 lines, mirrored from jobworkerp-rs `runner/schema/workflow.yaml`). Sync manually when the upstream schema changes.
-10. **Workflow docs**: See `WORKFLOW.md` (English) or `WORKFLOW_ja.md` (Japanese) for usage documentation
+1. **Runner names are case-sensitive**: `COMMAND`, `LLM`, `HTTP_REQUEST`, `GRPC`, `DOCKER`, `PYTHON_COMMAND`, `WORKFLOW`, `SANDBOX`. MCP server names match `mcp-settings.toml`.
+2. **`using`**: required for `LLM` and for MCP servers with several tools; optional for `GRPC` (`unary`), `WORKFLOW` (`run`), `SANDBOX` (`run`).
+3. **Removed runners**: `GRPC_UNARY`, `LLM_COMPLETION`, `LLM_CHAT`, `INLINE_WORKFLOW`, `REUSABLE_WORKFLOW`, `CREATE_WORKFLOW` — use `GRPC`, `LLM`, `WORKFLOW` with `using`.
+4. **Field names in settings/arguments**: camelCase is conventional (`baseUrl`, `maxTokens`); snake_case is accepted too. **Unknown fields are silently ignored**, so double-check spelling against [Runner Schemas](references/runner-schemas.md). Runner results use camelCase keys, and 64-bit integers appear as strings.
+5. **Timeouts are opt-in**: a task without `timeout` has no deadline. `WORKFLOW_TASK_DEFAULT_TIMEOUT_SEC` applies only to run/call tasks without `timeout`; the workflow-level `timeout` is not inherited by inner tasks. A timeout raises `https://open-workflow-specification.org/spec/1.0.0/errors/timeout` (status 408), catchable with `try`, and cancels child jobs inside the timed-out task. See [Schema Reference](references/schema-reference.md#timeouts-and-child-job-cancellation).
+6. **Schema validation** is enabled by default at runtime (`WORKFLOW_SKIP_SCHEMA_VALIDATION=true` skips it). Plugin runners must still validate their own inputs.
+7. **Upstream docs**: `manual/en/src/workflow.md` (and `manual/ja/src/workflow.md`) in jobworkerp-rs.
+8. **Schema sync**: the bundled schemas are refreshed with `scripts/sync-schema.sh <jobworkerp-rs-root>` in this plugin repository.

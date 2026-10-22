@@ -1,0 +1,12 @@
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: call-unknown-type
+  version: "0.0.1"
+
+do:
+  - publish:
+      call: asyncapi
+      with:
+        method: get
+        endpoint: https://example.com

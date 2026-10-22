@@ -1,0 +1,14 @@
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: return-on-runner
+  version: "0.0.1"
+
+do:
+  - echo:
+      run:
+        runner:
+          name: COMMAND
+          arguments:
+            command: echo
+        return: stdout

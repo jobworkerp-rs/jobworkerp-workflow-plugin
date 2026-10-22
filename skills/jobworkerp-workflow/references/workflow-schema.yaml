@@ -3,11 +3,13 @@
 #     yq --output-format=json runner/schema/workflow.yaml > runner/schema/workflow.json
 #     cargo typify runner/schema/workflow.json
 #
-$id: https://serverlessworkflow.io/schemas/1.0.0/workflow.yaml
+$id: urn:jobworkerp-rs:schemas:open-workflow:1.0.0-jobworkerp:workflow
 $schema: https://json-schema.org/draft/2020-12/schema
 title: WorkflowSchema
 description: >-
   Workflow schema supporting job execution with functions and tools.
+  This is a jobworkerp extension schema based on Open Workflow 1.0.0.
+  The official schema is https://open-workflow-specification.org/schemas/1.0.0/workflow.json.
   
   Runtime expressions are supported in fields marked in descriptions:
   - jq syntax: ${.key.subkey} for data access, ${$task.input} for context
@@ -20,7 +22,7 @@ description: >-
   - Workflow: access via $workflow (e.g., $workflow.input.key, $workflow.id, $workflow.definition, $workflow.context_variables)
   - Task: access via $task (e.g., $task.definition, $task.input, $task.raw_output, $task.output, $task.flow_directive)
 type: object
-required: [document, input, do]
+required: [document, do]
 properties:
   checkpointing:
     type: object
@@ -88,6 +90,10 @@ properties:
     $ref: "#/$defs/input"
     title: Input
     description: Workflow input configuration.
+  use:
+    $ref: "#/$defs/reusableComponents"
+    title: Use
+    description: Reusable workflow components supported by this implementation.
   do:
     $ref: "#/$defs/taskList"
     title: Do
@@ -96,9 +102,9 @@ properties:
     title: DoTimeout
     description: >-
       Workflow-level timeout configuration. Applied to the implicit root task
-      that wraps all tasks declared under `do`. Overrides the
-      `WORKFLOW_TASK_DEFAULT_TIMEOUT_SEC` environment variable (default 3600s)
-      and allows specifying durations longer than 1 hour.
+      that wraps all tasks declared under `do`. When omitted, the workflow has
+      no overall timeout (timeouts are optional in the Open Workflow
+      Specification).
     oneOf:
       - $ref: "#/$defs/timeout"
         title: TimeoutDefinition
@@ -111,6 +117,90 @@ properties:
     title: Output
     description: Workflow output configuration.
 $defs:
+  reusableComponents:
+    type: object
+    title: ReusableComponents
+    description: Reusable workflow components.
+    unevaluatedProperties: false
+    properties:
+      timeouts:
+        type: object
+        title: ReusableTimeouts
+        description: Named timeout definitions.
+        additionalProperties:
+          $ref: "#/$defs/timeout"
+      authentications:
+        type: object
+        title: ReusableAuthentications
+        description: >-
+          Named authentication policy definitions referenced via
+          `authentication: { use: <name> }`.
+        additionalProperties:
+          $ref: "#/$defs/authenticationPolicy"
+      secrets:
+        type: array
+        title: ReusableSecrets
+        description: >-
+          Declared secret names. Values are supplied at runtime via the
+          `WORKFLOW_SECRET_<UPPER_SNAKE_NAME>` environment variable and are
+          never written in the workflow definition. Only declared names may be
+          referenced through `${ $secrets.<name> }`.
+        items:
+          type: string
+  secretBasedAuthenticationPolicy:
+    title: SecretBasedAuthenticationPolicy
+    description: >-
+      Reference to a declared secret (under `use.secrets`). The runtime resolves
+      the value from the `WORKFLOW_SECRET_<UPPER_SNAKE_NAME>` environment variable.
+    type: object
+    required: [use]
+    unevaluatedProperties: false
+    properties:
+      use:
+        type: string
+        title: SecretBasedAuthenticationUse
+  authenticationPolicy:
+    title: AuthenticationPolicy
+    description: >-
+      Inline authentication policy. Property values may be literals or runtime
+      expressions (`${ $secrets.<name> }`), or the scheme may reference a declared
+      secret via `{ use: <name> }`.
+    type: object
+    unevaluatedProperties: false
+    oneOf:
+      - title: BasicAuthenticationPolicy
+        required: [basic]
+        properties:
+          basic:
+            title: BasicAuthentication
+            oneOf:
+              - title: BasicAuthenticationProperties
+                type: object
+                required: [username, password]
+                unevaluatedProperties: false
+                properties:
+                  username:
+                    type: string
+                    title: BasicAuthenticationUsername
+                  password:
+                    type: string
+                    title: BasicAuthenticationPassword
+              - $ref: "#/$defs/secretBasedAuthenticationPolicy"
+      - title: BearerAuthenticationPolicy
+        required: [bearer]
+        properties:
+          bearer:
+            title: BearerAuthentication
+            oneOf:
+              - title: BearerAuthenticationProperties
+                type: object
+                required: [token]
+                unevaluatedProperties: false
+                properties:
+                  token:
+                    type: string
+                    title: BearerAuthenticationToken
+              - $ref: "#/$defs/secretBasedAuthenticationPolicy"
   taskList:
     title: TaskList
     description: Ordered list of named tasks.
@@ -174,6 +264,7 @@ $defs:
       - $ref: "#/$defs/forkTask"
       - $ref: "#/$defs/forTask"
       - $ref: "#/$defs/raiseTask"
+      - $ref: "#/$defs/callTask"
       - $ref: "#/$defs/runTask"
       - $ref: "#/$defs/setTask"
       - $ref: "#/$defs/switchTask"
@@ -287,8 +378,153 @@ $defs:
                 description: Inline error definition.
               - type: string
                 title: RaiseErrorReference
-                description: Reference to named error definition.
+                description: Runtime expression (jq or Liquid) evaluated at execution time. A string result is raised as the detail of a default runtime error (status 500); an Error object result (e.g. a caught $error) is raised unchanged.
         required: [error]
+  callTask:
+    type: object
+    $ref: "#/$defs/taskBase"
+    title: CallTask
+    description: Invoke a service through an Open Workflow call task.
+    required: [call, with]
+    unevaluatedProperties: false
+    properties:
+      call:
+        type: string
+        title: CallTaskType
+        description: Supported call types (HTTP and gRPC unary).
+        enum: [http, grpc]
+      with:
+        title: CallTaskWith
+        description: Call input. HTTP or gRPC parameters.
+        oneOf:
+          - $ref: "#/$defs/callHttp"
+          - $ref: "#/$defs/callGrpc"
+  callHttp:
+    type: object
+    title: CallHttp
+    description: HTTP call parameters supported by the jobworkerp adapter.
+    required: [method, endpoint]
+    unevaluatedProperties: false
+    properties:
+      method:
+        type: string
+        title: HttpMethod
+        description: HTTP method to execute.
+      endpoint:
+        title: HttpEndpoint
+        description: Literal endpoint URI or endpoint object.
+        oneOf:
+          - type: string
+            title: HttpEndpointUri
+          - type: object
+            title: HttpEndpointObject
+            required: [uri]
+            unevaluatedProperties: false
+            properties:
+              uri:
+                type: string
+                title: HttpEndpointObjectUri
+              authentication:
+                title: HttpEndpointAuthentication
+                description: >-
+                  Endpoint authentication. Inline bearer/basic policy, or a
+                  reference to a named policy declared under
+                  `use.authentications`.
+                oneOf:
+                  - $ref: "#/$defs/authenticationPolicy"
+                  - title: AuthenticationPolicyReference
+                    type: object
+                    required: [use]
+                    unevaluatedProperties: false
+                    properties:
+                      use:
+                        type: string
+                        title: AuthenticationPolicyUse
+                        description: Name of a policy declared under use.authentications.
+      headers:
+        type: object
+        title: HttpHeaders
+        description: Header map. Values are converted to strings by the executor.
+        additionalProperties: true
+      query:
+        type: object
+        title: HttpQuery
+        description: Query parameter map. Values are converted to strings by the executor.
+        additionalProperties: true
+      body:
+        title: HttpBody
+        description: Request body. Non-string values are serialized as JSON.
+      output:
+        type: string
+        title: HttpOutput
+        description: HTTP output shape.
+        enum: [content, response]
+        default: content
+      redirect:
+        title: HttpRedirect
+        description: Accepted for validation but not executed in Phase 1.
+  callGrpc:
+    type: object
+    title: CallGrpc
+    description: >-
+      gRPC unary call parameters supported by the jobworkerp adapter. The
+      arguments map is sent as a JSON body resolved via server reflection.
+    required: [service, method]
+    unevaluatedProperties: false
+    properties:
+      proto:
+        title: GrpcProto
+        description: >-
+          Official proto resource reference. Accepted for validation but not
+          executed by the jobworkerp adapter (reflection is used instead);
+          rejected at execution time.
+      service:
+        type: object
+        title: GrpcService
+        description: gRPC service connection target.
+        required: [name, host]
+        unevaluatedProperties: false
+        properties:
+          name:
+            type: string
+            title: GrpcServiceName
+            description: Fully qualified gRPC service name (e.g. package.Service).
+          host:
+            type: string
+            title: GrpcServiceHost
+            description: Hostname or IP of the gRPC server.
+          port:
+            type: integer
+            title: GrpcServicePort
+            description: Port of the gRPC server.
+          authentication:
+            title: GrpcServiceAuthentication
+            description: >-
+              Service authentication. Inline bearer policy, or a reference to a
+              named policy declared under `use.authentications`. Only bearer is
+              supported; basic is rejected at execution time.
+            oneOf:
+              - $ref: "#/$defs/authenticationPolicy"
+              - title: AuthenticationPolicyReference
+                type: object
+                required: [use]
+                unevaluatedProperties: false
+                properties:
+                  use:
+                    type: string
+                    title: AuthenticationPolicyUse
+                    description: Name of a policy declared under use.authentications.
+      method:
+        type: string
+        title: GrpcMethod
+        description: Name of the gRPC method to invoke on the service.
+      arguments:
+        type: object
+        title: GrpcArguments
+        description: >-
+          Name/value mapping of the call arguments. Serialized to a JSON request
+          body and converted to protobuf by the runner via reflection.
+        additionalProperties: true
   runTask:
     type: object
     $ref: "#/$defs/taskBase"
@@ -313,29 +549,25 @@ $defs:
         title: RunTaskConfiguration
         description: Process execution configuration.
         unevaluatedProperties: false
-        properties:
-          await:
-            type: boolean
-            default: true
-            title: AwaitProcessCompletion
-            description: Wait for process completion before continuing.
-          return:
-            type: string
-            title: ProcessReturnType
-            description: Process output type to return.
-            enum: [stdout, stderr, code, all, none]
-            default: stdout
         oneOf:
           - $ref: "#/$defs/runWorker"
           - $ref: "#/$defs/runRunner"
           - $ref: "#/$defs/runFunction"
           - $ref: "#/$defs/runScript"
+          - $ref: "#/$defs/runShell"
+          - $ref: "#/$defs/runContainer"
+          - $ref: "#/$defs/runWorkflow"
   runRunner:
     type: object
     title: RunRunner
     description: Execute using a runner configuration.
     required: [runner]
     properties:
+      await: &awaitProcessCompletion
+        type: boolean
+        default: true
+        title: AwaitProcessCompletion
+        description: Wait for process completion before continuing.
       runner:
         type: object
         title: RunJobRunner
@@ -422,6 +654,7 @@ $defs:
     description: Execute using a worker configuration.
     required: [worker]
     properties:
+      await: *awaitProcessCompletion
       worker:
         type: object
         title: RunJobWorker
@@ -452,6 +685,7 @@ $defs:
     description: Execute using a function configuration.
     required: [function]
     properties:
+      await: *awaitProcessCompletion
       function:
         type: object
         title: RunJobFunction
@@ -512,9 +746,23 @@ $defs:
   runScript:
     type: object
     title: RunScript
-    description: Execute inline or external scripts (Serverless Workflow v1.0.0 compliant)
+    description: |
+      Execute inline or external scripts. This is close to Open Workflow
+      v1.0.0 run.script. await is supported (await: false runs fire-and-forget),
+      and return shapes the process result (stdout/stderr/code/all/none, default
+      stdout). Unlike run.shell / run.container, run.script has no
+      treatNonzeroAsError / successExitCodes option: a non-zero exit always
+      fails the task before return is applied, so return: code / all only
+      observe a successful exit (0).
     required: [script]
     properties:
+      await: *awaitProcessCompletion
+      return: &processReturnType
+        type: string
+        title: ProcessReturnType
+        description: Process output type to return.
+        enum: [stdout, stderr, code, all, none]
+        default: stdout
       script:
         type: object
         title: ScriptConfiguration
@@ -548,6 +796,149 @@ $defs:
         oneOf:
           - required: [code]
           - required: [source]
+    additionalProperties: false
+  runShell:
+    type: object
+    title: RunShell
+    description: Execute a shell command. Some optional fields are jobworkerp extensions.
+    required: [shell]
+    properties:
+      await: *awaitProcessCompletion
+      return: *processReturnType
+      shell:
+        $ref: "#/$defs/shellConfiguration"
+    additionalProperties: false
+  shellConfiguration:
+    title: ShellConfiguration
+    description: Shell command configuration. A string is treated as the command.
+    oneOf:
+      - type: string
+        title: ShellCommandLine
+      - type: object
+        title: ShellCommand
+        required: [command]
+        properties:
+          command:
+            type: string
+            title: ShellCommandName
+          args:
+            type: array
+            title: ShellCommandArguments
+            default: []
+            items:
+              type: string
+          workingDir:
+            type: string
+            title: ShellWorkingDirectory
+          withMemoryMonitoring:
+            type: boolean
+            title: ShellMemoryMonitoring
+            description: "Enable process memory observation. (jobworkerp extension)"
+          treatNonzeroAsError:
+            type: boolean
+            title: ShellTreatNonzeroAsError
+            description: "Treat non-zero exit codes as task failure unless the code is listed in successExitCodes. (jobworkerp extension)"
+          successExitCodes:
+            type: array
+            title: ShellSuccessExitCodes
+            description: "Additional process exit codes to treat as success. (jobworkerp extension)"
+            default: []
+            items:
+              type: integer
+              format: int32
+        additionalProperties: false
+  runContainer:
+    type: object
+    title: RunContainer
+    description: Execute a container. Some optional fields are jobworkerp extensions.
+    required: [container]
+    properties:
+      await: *awaitProcessCompletion
+      return: *processReturnType
+      container:
+        $ref: "#/$defs/containerConfiguration"
+    additionalProperties: false
+  containerConfiguration:
+    type: object
+    title: ContainerConfiguration
+    required: [image]
+    properties:
+      image:
+        type: string
+        title: ContainerImage
+      command:
+        type: array
+        title: ContainerCommand
+        default: []
+        items:
+          type: string
+      entrypoint:
+        type: array
+        title: ContainerEntrypoint
+        default: []
+        items:
+          type: string
+      env:
+        type: object
+        title: ContainerEnvironment
+        additionalProperties:
+          type: string
+      user:
+        type: string
+        title: ContainerUser
+      workingDir:
+        type: string
+        title: ContainerWorkingDirectory
+      timeoutSec:
+        type: integer
+        format: uint64
+        title: ContainerTimeoutSec
+        description: "Job timeout in seconds. (jobworkerp extension)"
+      treatNonzeroAsError:
+        type: boolean
+        title: ContainerTreatNonzeroAsError
+        description: "Treat non-zero exit codes as task failure unless the code is listed in successExitCodes. (jobworkerp extension)"
+      successExitCodes:
+        type: array
+        title: ContainerSuccessExitCodes
+        description: "Additional container process exit codes to treat as success. (jobworkerp extension)"
+        default: []
+        items:
+          type: integer
+          format: int32
+    additionalProperties: false
+  runWorkflow:
+    type: object
+    title: RunWorkflow
+    description: Execute a nested workflow using jobworkerp's source-based workflow extension.
+    required: [workflow]
+    properties:
+      await: *awaitProcessCompletion
+      workflow:
+        $ref: "#/$defs/workflowConfiguration"
+    additionalProperties: false
+  workflowConfiguration:
+    type: object
+    title: WorkflowConfiguration
+    description: "Nested workflow source. Parent workflow_context is inherited implicitly; workflowContext is not a DSL field. (jobworkerp extension)"
+    oneOf:
+      - required: [workflowData]
+      - required: [workflowUrl]
+    properties:
+      workflowData:
+        type: string
+        title: WorkflowData
+        description: "Inline nested workflow definition as JSON or YAML. (jobworkerp extension)"
+      workflowUrl:
+        type: string
+        title: WorkflowUrl
+        description: "Nested workflow definition URL or path. (jobworkerp extension)"
+      input:
+        title: WorkflowInput
+        description: Input passed to the nested workflow. Non-string values are serialized as JSON.
+      executionId:
+        type: string
+        title: WorkflowExecutionId
     additionalProperties: false
   setTask:
     type: object
@@ -640,7 +1031,7 @@ $defs:
                 description: Retry policy configuration.
               - type: string
                 title: RetryPolicyReference
-                description: Reference to named retry policy.
+                description: Named retry policy reference. Named retry policies are not implemented; a string value disables retry for this catch.
           do:
             $ref: "#/$defs/taskList"
             title: TryTaskCatchDo

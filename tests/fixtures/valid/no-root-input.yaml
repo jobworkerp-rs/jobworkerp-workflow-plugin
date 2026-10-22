@@ -1,0 +1,12 @@
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: no-root-input
+  version: "0.0.1"
+
+do:
+  - echo:
+      run:
+        shell:
+          command: echo
+          args: ["${.message}"]
