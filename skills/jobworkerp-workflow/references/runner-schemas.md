@@ -203,7 +203,7 @@ arguments:
     dimensions: 768
     truncate: "END"
     embeddingType: "..."
-    encodingFormat: "float"    # Only float; other values are ignored (provider default)
+    encodingFormat: "float"    # float / float32 (sent as float); others warn and use the provider default
     user: "..."
   chunking: { maxChunkTokens: 512 }   # Overrides settings.embeddingChunking
 ```
