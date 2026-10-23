@@ -16,7 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
@@ -112,6 +112,48 @@ def validate(path: Path) -> tuple[bool, str]:
     return proc.returncode == 0, (proc.stdout + proc.stderr).strip()
 
 
+@dataclass
+class Report:
+    checked: int = 0
+    skipped: int = 0
+    failures: list[str] = field(default_factory=list)
+
+
+def check_markdown_examples(report: Report) -> None:
+    validated = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpdir = Path(tmp)
+        for md in MARKDOWN_FILES:
+            for block in extract_blocks(md):
+                workflow = to_workflow(block.text)
+                if workflow is None:
+                    report.skipped += 1
+                    continue
+                target = tmpdir / f"block-{validated}.yaml"
+                target.write_text(workflow, encoding="utf-8")
+                validated += 1
+                report.checked += 1
+                ok, out = validate(target)
+                if not ok:
+                    report.failures.append(
+                        f"{block.source}:{block.line}: schema violation\n{out}"
+                    )
+
+
+def check_fixtures(kind: str, report: Report, *, expect_valid: bool) -> None:
+    for fixture in sorted((FIXTURES / kind).glob("*.yaml")):
+        report.checked += 1
+        ok, out = validate(fixture)
+        if ok == expect_valid:
+            continue
+        name = fixture.relative_to(PLUGIN_ROOT)
+        report.failures.append(
+            f"{name}: expected valid\n{out}"
+            if expect_valid
+            else f"{name}: expected schema rejection but it passed"
+        )
+
+
 def main() -> int:
     if shutil.which("check-jsonschema") is None:
         print(
@@ -120,46 +162,18 @@ def main() -> int:
         )
         return 2
 
-    failures: list[str] = []
-    checked = skipped = 0
+    report = Report()
+    check_markdown_examples(report)
+    check_fixtures("valid", report, expect_valid=True)
+    check_fixtures("invalid", report, expect_valid=False)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        tmpdir = Path(tmp)
-        for md in MARKDOWN_FILES:
-            for block in extract_blocks(md):
-                workflow = to_workflow(block.text)
-                if workflow is None:
-                    skipped += 1
-                    continue
-                target = tmpdir / f"block-{checked}.yaml"
-                target.write_text(workflow, encoding="utf-8")
-                checked += 1
-                ok, out = validate(target)
-                if not ok:
-                    failures.append(
-                        f"{block.source}:{block.line}: schema violation\n{out}"
-                    )
-
-    for fixture in sorted((FIXTURES / "valid").glob("*.yaml")):
-        checked += 1
-        ok, out = validate(fixture)
-        if not ok:
-            failures.append(
-                f"{fixture.relative_to(PLUGIN_ROOT)}: expected valid\n{out}"
-            )
-
-    for fixture in sorted((FIXTURES / "invalid").glob("*.yaml")):
-        checked += 1
-        ok, _ = validate(fixture)
-        if ok:
-            failures.append(
-                f"{fixture.relative_to(PLUGIN_ROOT)}: expected schema rejection but it passed"
-            )
-
-    for failure in failures:
+    for failure in report.failures:
         print(f"FAIL {failure}\n")
-    print(f"checked={checked} skipped_fragments={skipped} failed={len(failures)}")
-    return 1 if failures else 0
+    print(
+        f"checked={report.checked} skipped_fragments={report.skipped} "
+        f"failed={len(report.failures)}"
+    )
+    return 1 if report.failures else 0
 
 
 if __name__ == "__main__":

@@ -72,10 +72,14 @@ Example prompts:
 Requires [`check-jsonschema`](https://github.com/python-jsonschema/check-jsonschema) and Python 3.
 
 ```bash
-# Validate every complete workflow example in the skill docs and the test fixtures
+# Run the validator's own unit tests, then validate every complete workflow example
+# in the skill docs and the test fixtures
 # (tests/fixtures/valid must pass, tests/fixtures/invalid must be rejected).
 # With a jobworkerp-rs checkout path, also verify the bundled schemas are up to date.
 scripts/test.sh [<jobworkerp-rs-root>]
+
+# Run only the validator's unit tests (no check-jsonschema needed)
+python3 -I tests/test_validate_examples.py
 
 # Refresh the bundled schemas from a jobworkerp-rs checkout
 scripts/sync-schema.sh <jobworkerp-rs-root>
