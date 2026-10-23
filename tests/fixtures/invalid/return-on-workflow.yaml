@@ -1,0 +1,12 @@
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: return-on-workflow
+  version: "0.0.1"
+
+do:
+  - child:
+      run:
+        workflow:
+          workflowUrl: ./child.yaml
+        return: all

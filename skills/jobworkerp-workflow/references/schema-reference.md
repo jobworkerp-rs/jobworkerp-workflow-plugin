@@ -1,83 +1,260 @@
 # Workflow Schema Quick Reference
 
-Custom Serverless Workflow DSL v1.0.0 for jobworkerp-rs.
+jobworkerp-rs workflow DSL: Open Workflow DSL v1.0.0 flow control plus jobworkerp extensions.
 
-This document is the quick reference. For the authoritative, machine-checkable definition (every required field, enum, pattern, and constraint), see [`workflow-schema.yaml`](workflow-schema.yaml) — a JSON Schema (Draft 2020-12) bundled with this skill and mirrored from jobworkerp-rs `runner/schema/workflow.yaml`.
+This is the quick reference. For the machine-checkable definition see [`workflow-schema.yaml`](workflow-schema.yaml) (readable) and [`workflow-validation-schema.json`](workflow-validation-schema.json) (what the runtime validator uses).
 
 ## Top-Level Structure
 
+<!-- validate:skip -->
 ```yaml
-document:        # REQUIRED - Workflow metadata
-  dsl: "0.0.1"   # REQUIRED - DSL version (semver)
-  namespace: default  # REQUIRED - Namespace (alphanumeric+hyphens)
-  name: my-workflow   # REQUIRED - Workflow name (alphanumeric+hyphens)
-  version: "0.0.1"   # REQUIRED - Workflow version (semver)
-  title: "..."        # Optional - Human-readable title
-  summary: "..."      # Optional - Markdown summary
-  tags: {}            # Optional - Key/value tags
-  metadata: {}        # Optional - Additional metadata
-input:           # REQUIRED - Input configuration
-  schema: ...    # Optional - Input validation schema
-  from: ...      # Optional - Runtime expression to transform input
-do:              # REQUIRED - Task list to execute
-  - TaskName:
-      ...
-output:          # Optional - Output configuration
+document:        # REQUIRED
+  dsl: "0.0.1"   # REQUIRED - semver
+  namespace: default  # REQUIRED - alphanumeric + hyphens
+  name: my-workflow   # REQUIRED - alphanumeric + hyphens
+  version: "0.0.1"    # REQUIRED - semver
+  title: "..."        # Optional
+  summary: "..."      # Optional - Markdown
+  tags: {}            # Optional
+  metadata: {}        # Optional
+input:           # Optional - omitted: no validation, no input.from, input passed through
   schema: ...
-  as: ...        # Runtime expression to transform output
-checkpointing:   # Optional - Checkpoint configuration
+  from: ...
+use:             # Optional - reusable components (see below)
+  timeouts: {}
+  authentications: {}
+  secrets: []
+timeout:         # Optional - whole-workflow timeout, inline or a use.timeouts name
+  after: { hours: 2 }
+do:              # REQUIRED - task list
+  - TaskName: ...
+output:          # Optional
+  schema: ...
+  as: ...
+checkpointing:   # Optional
   enabled: false
-  storage: "memory"  # "memory" or "redis"
+  storage: "memory"  # "memory" | "redis"
 ```
+
+## Reusable Components (`use`)
+
+| Key | Type | Referenced by |
+|-----|------|---------------|
+| `timeouts` | map name → `{after: duration}` | `timeout: <name>` on a task or the workflow |
+| `authentications` | map name → bearer/basic policy | `authentication: { use: <name> }` in call tasks |
+| `secrets` | list of names | `{ use: <name> }` inside a policy, or `$secrets.<name>` in call task expressions |
+
+`use.catalogs`, `use.extensions`, `use.functions`, `use.errors`, and named retry policies are **not** supported.
+
+### Secrets
+
+- Values never appear in YAML. Each declared name is read from `WORKFLOW_SECRET_<UPPER_SNAKE_NAME>` (non-alphanumerics become `_`: `github-token` → `WORKFLOW_SECRET_GITHUB_TOKEN`).
+  - bearer: the token string (or `{"token": "..."}` JSON)
+  - basic: `{"username": "...", "password": "..."}` JSON
+- Three ways to bind a scheme value:
+  1. `bearer: { use: github-token }` / `basic: { use: creds }` (preferred)
+  2. Expression: `bearer: { token: "${ $secrets.api_token }" }` (`$secrets["github-token"]` for hyphenated names; Liquid: `{{ secrets.api_token }}`)
+  3. Literal value (discouraged for credentials)
+- Only declared names resolve; an undeclared reference is an error. `$secrets` is available only while evaluating **call** tasks and is never written to the context. `secrets` is reserved: workflow input cannot override it.
 
 ## Task Types
 
 Each task item in `do` is a single-key object: `- TaskName: { taskDefinition }`.
 
-### runTask - Execute external processes
+### runTask
 
+`run` holds exactly one of `runner`, `function`, `worker`, `script`, `shell`, `container`, `workflow`.
+
+| Form | `await` | `return` | Notes |
+|------|:-:|:-:|-------|
+| `runner` | yes | no | Runner by name with `settings`, `arguments`, `options`, `using` |
+| `function` | yes | no | `runnerName` (+`settings`/`options`) or `workerName` |
+| `worker` | yes | no | Pre-configured worker by `name` |
+| `workflow` | yes | no | Nested workflow; output is the WORKFLOW runner result |
+| `shell` | yes | yes | COMMAND runner; does not fail on non-zero exit by default |
+| `container` | yes | yes | DOCKER runner; does not fail on non-zero exit by default |
+| `script` | yes | yes | PYTHON_COMMAND runner; non-zero exit always fails; no streaming |
+
+- `await` (default `true`): `false` enqueues fire-and-forget and passes the task input through. Not allowed with `useStreaming: true`.
+- `return` (default `stdout`): `stdout` / `stderr` (raw strings, not parsed as JSON), `code`, `all` (`{code, stdout, stderr}`), `none`.
+- `useStreaming` (sibling of `run`, default `false`): streams intermediate results via ListenStream and collects the final result.
+
+#### run.runner
+
+<!-- validate:skip -->
 ```yaml
-- MyTask:
-    run:
-      await: true          # Wait for completion (default: true)
-      return: stdout       # stdout|stderr|code|all|none (default: stdout)
-      runner: ...          # Option 1: runRunner
-      worker: ...          # Option 2: runWorker
-      function: ...        # Option 3: runFunction
-      script: ...          # Option 4: runScript
-    useStreaming: false     # Enable streaming execution
+run:
+  runner:
+    name: COMMAND           # REQUIRED
+    using: "chat"           # Method for multi-method runners
+    settings: {}            # Runner initialization settings
+    arguments: {}           # REQUIRED
+    options:                # workerOptions (below)
+      channel: workflow
 ```
 
-### forTask - Iterate over collection
+#### run.function
 
+<!-- validate:skip -->
+```yaml
+run:
+  function:
+    runnerName: COMMAND     # Either runnerName ...
+    # workerName: MyWorker  # ... or workerName
+    using: "..."            # Optional method
+    settings: {}            # runnerName only
+    options: {}             # runnerName only
+    arguments: {}           # REQUIRED
+```
+
+#### run.worker
+
+<!-- validate:skip -->
+```yaml
+run:
+  worker:
+    name: "MyWorker"        # REQUIRED
+    using: "run"            # Optional
+    arguments: {}           # REQUIRED
+```
+
+#### run.shell
+
+<!-- validate:skip -->
+```yaml
+run:
+  shell:                    # or a plain string: `shell: "echo hello"`
+    command: ls             # REQUIRED
+    args: ["-la"]
+    workingDir: /tmp
+    withMemoryMonitoring: false   # jobworkerp extension
+    treatNonzeroAsError: true     # jobworkerp extension
+    successExitCodes: [1]         # jobworkerp extension
+  return: all
+```
+
+#### run.container
+
+<!-- validate:skip -->
+```yaml
+run:
+  container:
+    image: alpine:3.20      # REQUIRED
+    command: ["echo", "hi"]
+    entrypoint: []
+    env: { KEY: value }
+    user: "1000"
+    workingDir: /work
+    timeoutSec: 300               # jobworkerp extension
+    treatNonzeroAsError: true     # jobworkerp extension
+    successExitCodes: []          # jobworkerp extension
+  return: stdout
+```
+
+#### run.script
+
+<!-- validate:skip -->
+```yaml
+run:
+  script:
+    language: python        # REQUIRED
+    code: |                 # inline, or `source:` for an external resource
+      print("Hello")
+    arguments: {}
+    environment: {}
+  return: stdout
+```
+
+#### run.workflow
+
+<!-- validate:skip -->
+```yaml
+run:
+  workflow:
+    workflowUrl: ./child.yaml     # or workflowData: <inline YAML/JSON string>
+    input: { value: 1 }           # non-string values are serialized as JSON
+    executionId: "..."            # Optional
+```
+
+The parent `workflow_context` is inherited implicitly (`workflowContext` is not a DSL field). The output is the WORKFLOW runner result (`id`, `output` as a string, `status`, ...).
+
+### callTask
+
+#### call: http
+
+<!-- validate:skip -->
+```yaml
+- CallApi:
+    call: http
+    with:
+      method: post                 # REQUIRED
+      endpoint:                    # REQUIRED - URI string or object
+        uri: https://api.example.com/items
+        authentication:            # inline policy or { use: <name> }
+          bearer: { use: api-token }
+      headers: { Accept: application/json }   # values converted to strings
+      query: { page: 1 }
+      body: { name: "x" }          # non-string bodies are sent as JSON
+      output: content              # content (default) | response
+```
+
+- `output: content` → response body (JSON-parsed when the content type is JSON).
+- `output: response` → `{ statusCode, headers, body }`.
+- Supported auth: bearer and basic. Not supported: digest / oauth2 / oidc / certificate, `output: raw`. `redirect` is accepted but ignored.
+
+#### call: grpc
+
+<!-- validate:skip -->
+```yaml
+- GetUser:
+    call: grpc
+    with:
+      service:                     # REQUIRED
+        name: example.UserService  # REQUIRED - fully qualified
+        host: localhost            # REQUIRED
+        port: 50051
+        authentication:            # bearer only (basic is rejected)
+          use: grpc-auth
+      method: GetUser              # REQUIRED
+      arguments: { id: "${.userId}" }
+```
+
+- Unary only, through the GRPC runner with server reflection. `proto` is accepted by the schema but rejected at run time.
+- Output: `{ code, body, metadata, message? }` where `body` is the JSON-parsed response.
+
+### forTask
+
+<!-- validate:skip -->
 ```yaml
 - MyLoop:
     for:
-      each: item       # Variable name for current item (default: item)
-      in: "${.array}"  # Runtime expression returning collection
-      at: index        # Variable name for current index (default: index)
-    while: "${...}"    # Optional continuation condition
-    inParallel: false  # Execute iterations in parallel
-    onError: break     # "continue" or "break" (default: break)
+      each: item       # default: item
+      in: "${.array}"  # REQUIRED
+      at: index        # default: index
+    while: "${...}"
+    inParallel: false
+    onError: break     # break (default) | continue
     do:
-      - ...            # Tasks to execute per iteration
+      - ...
 ```
 
-### forkTask - Concurrent execution
+With `inParallel: true` and `onError: break`, a failing item cancels the other items' child jobs.
 
+### forkTask
+
+<!-- validate:skip -->
 ```yaml
 - MyConcurrent:
     fork:
       branches:
-        - Branch1:
-            ...
-        - Branch2:
-            ...
-      compete: false   # First completed wins (default: false)
+        - Branch1: ...
+        - Branch2: ...
+      compete: false   # true: first completed branch wins, losers' child jobs are cancelled
 ```
 
-### doTask - Sequential subtasks
+### doTask
 
+<!-- validate:skip -->
 ```yaml
 - MyGroup:
     do:
@@ -85,23 +262,24 @@ Each task item in `do` is a single-key object: `- TaskName: { taskDefinition }`.
       - SubTask2: ...
 ```
 
-### switchTask - Conditional branching
+### switchTask
 
 ```yaml
 - MySwitch:
     switch:
       - case1:
-          when: "${.value == 1}"   # Runtime expression condition
-          then: continue           # Flow directive
+          when: "${.value == 1}"
+          then: continue
       - case2:
           when: "${.value == 2}"
           then: exit
       - default:
-          then: continue           # No 'when' = default case
+          then: end        # no `when` = default case
 ```
 
-### tryTask - Error handling
+### tryTask
 
+<!-- validate:skip -->
 ```yaml
 - MyTry:
     try:
@@ -109,24 +287,26 @@ Each task item in `do` is a single-key object: `- TaskName: { taskDefinition }`.
     catch:
       errors:
         with:
-          type: "https://..."    # Filter by error type URI
-          status: 500            # Filter by status code
-      as: error                  # Variable name for caught error (default: error)
-      when: "${...}"             # Condition to enable catching
-      exceptWhen: "${...}"       # Condition to disable catching
-      retry:                     # Retry policy
+          type: "https://..."    # static filters: type, status, instance, title, details
+          status: 500
+      as: error                  # default: error
+      when: "${...}"
+      exceptWhen: "${...}"
+      retry:                     # inline policy only (string references are not implemented)
         delay: { seconds: 5 }
         backoff:
-          exponential: {}        # constant|exponential|linear
+          exponential: {}        # constant | exponential | linear
         limit:
           attempt:
             count: 3
             duration: { minutes: 5 }
       do:
-        - FallbackTask: ...      # Fallback tasks
+        - FallbackTask: ...
 ```
 
-### setTask - Set context variables
+A caught error has `type`, `status`, `instance`, `title`, `detail` (there is no `message` field).
+
+### setTask
 
 ```yaml
 - MySet:
@@ -135,209 +315,130 @@ Each task item in `do` is a single-key object: `- TaskName: { taskDefinition }`.
       computed: "${.a + .b}"
 ```
 
-Variables set here are accessible as `$myVar` in jq or `{{ myVar }}` in Liquid.
+The values become context variables (`$myVar` / `{{ myVar }}`) **and** replace the current data passed to the next task.
 
-### raiseTask - Raise an error
+### raiseTask
 
 ```yaml
-- MyError:
+- NotFound:
     raise:
       error:
-        type: "https://example.com/errors/not-found"
-        status: 404
-        title: "Not Found"
-        detail: "Resource not found"
+        type: https://example.com/errors/not-found   # REQUIRED - absolute URI
+        status: 404                                  # REQUIRED
+        title: "Not Found"                           # runtime expressions allowed
+        detail: '${ "id=" + .id }'                   # runtime expressions allowed
 ```
 
-### waitTask - Pause execution
+`raise.error` may also be a runtime-expression string. A string result becomes the `detail` of a default runtime error (status 500); an Error object result is raised unchanged, which rethrows a caught error:
+
+<!-- validate:skip -->
+```yaml
+catch:
+  as: error
+  do:
+    - rethrow:
+        raise:
+          error: "${ $error }"
+```
+
+### waitTask
 
 ```yaml
 - MyWait:
     wait:
-      seconds: 30
-      # Or ISO 8601: "PT30S"
-      # Or: { days: 1, hours: 2, minutes: 30, seconds: 0, milliseconds: 0 }
+      seconds: 30      # or ISO 8601 "PT30S", or {days, hours, minutes, seconds, milliseconds}
 ```
 
-## taskBase - Common Properties (all task types)
+## taskBase - Common Properties
 
+<!-- validate:skip -->
 ```yaml
 - AnyTask:
-    if: "${...}"        # Condition to execute this task
-    input:
-      from: "${...}"    # Transform input data
-      schema: ...       # Validate input
-    output:
-      as: "${...}"      # Transform output data (string or object)
-      schema: ...       # Validate output
-    export:
-      as: "${...}"      # Export to workflow context variables
-      schema: ...       # Validate exported data
-    timeout:
-      after: { seconds: 30 }  # Timeout duration
-    then: continue      # Flow directive after completion
-    checkpoint: false   # Save state for checkpoint/restart
-    metadata: {}        # Additional metadata
+    if: "${...}"
+    input:  { from: "${...}", schema: ... }
+    output: { as: "${...}", schema: ... }
+    export: { as: "${...}", schema: ... }
+    timeout: { after: { seconds: 30 } }   # or the name of a use.timeouts entry
+    then: continue
+    checkpoint: false
+    metadata: {}
 ```
 
 ### `if: false` skips the whole task (including `export.as`)
 
-When `if` evaluates to false, Serverless Workflow v1.0.0 skips the task entirely: `run`/`do`/`set`, `output.as`, **and `export.as`** are all bypassed, and the raw input passes through as the task's output. A context variable that you expected an `if`-gated task to populate via `export.as` will silently remain at its seed value (or undefined).
+The body, `output.as`, and `export.as` are bypassed and the raw input passes through. Seed variables up front and resolve them with an unconditional `set` (see SKILL.md "Pitfall").
 
-When a variable must be populated regardless of which branch ran, follow up with an unconditional `set` task using jq's `//` fallback:
+## Timeouts and Child Job Cancellation
 
-```yaml
-- ResolveThreadId:
-    set:
-      threadId: ${$existingThreadId // $createdThreadId}
-    export:
-      as:
-        threadId: ${.threadId}
-```
-
-See SKILL.md "Pitfall: `if: false` Skips the *Entire* Task" for a full bug→fix walk-through.
-
-## runTask Execution Methods
-
-### 1. runRunner (most common)
-
-```yaml
-run:
-  runner:
-    name: COMMAND           # REQUIRED - Runner name
-    using: "chat"           # Optional - Method selection for multi-method runners
-    settings: {}            # Optional - Runner initialization settings (JSON)
-    arguments: {}           # REQUIRED - Job arguments (JSON)
-    options:                # Optional - Worker options
-      channel: workflow
-      useStatic: false
-```
-
-### 2. runWorker (pre-configured worker)
-
-```yaml
-run:
-  worker:
-    name: "MyWorker"        # REQUIRED - Worker name
-    using: "run"            # Optional - Method selection
-    arguments: {}           # REQUIRED - Job arguments
-```
-
-### 3. runFunction (runner or worker by name)
-
-```yaml
-run:
-  function:
-    runnerName: COMMAND     # Use runner by name
-    # OR
-    workerName: "MyWorker"  # Use worker by name
-    using: "..."            # Optional method
-    settings: {}            # Optional (runner only)
-    options: {}             # Optional (runner only)
-    arguments: {}           # REQUIRED
-```
-
-### 4. runScript (inline/external scripts)
-
-```yaml
-run:
-  script:
-    language: python        # REQUIRED - Script language
-    code: |                 # Inline code (or use 'source' for external)
-      print("Hello")
-    arguments: {}           # Optional - Script arguments
-    environment: {}         # Optional - Environment variables
-```
+- `timeout` is optional everywhere; without it a task has no deadline.
+- `WORKFLOW_TASK_DEFAULT_TIMEOUT_SEC`, when set, applies only to **run/call** tasks without `timeout` — never to do/try/for/fork, so outer tasks need no longer timeout than their children.
+- The workflow-level `timeout` covers the whole run only; it is not a default for inner tasks.
+- Expiry raises type `https://open-workflow-specification.org/spec/1.0.0/errors/timeout`, status `408` — catch it with `catch.errors.with.type`.
+- In-flight child jobs (from run/call tasks) are cancelled when:
+  - the workflow job is cancelled or hits its job timeout
+  - a task times out (only child jobs inside that task)
+  - an `inParallel` for with `onError: break` stops after a failure
+  - a `compete: true` fork has a winner (losing branches)
+- A stream consumer disconnecting does **not** cancel child jobs.
 
 ## workerOptions
 
+<!-- validate:skip -->
 ```yaml
 options:
-  channel: workflow           # Execution channel (concurrency control)
+  channel: workflow           # concurrency channel
   queueType: NORMAL           # NORMAL | WITH_BACKUP | DB_ONLY
-  responseType: DIRECT        # NO_RESULT | DIRECT
-  storeSuccess: true          # Store successful results in DB
-  storeFailure: true          # Store failure results in DB
-  useStatic: false            # Use static worker (pooled initialization)
-  broadcastResults: false     # Broadcast results to listeners
-  retry:                      # Retry policy
+  responseType: DIRECT        # DIRECT | NO_RESULT
+  storeSuccess: true
+  storeFailure: true
+  useStatic: false            # pooled, persisted worker
+  broadcastResults: false
+  retry:
     delay: { seconds: 5 }
-    backoff:
-      exponential: {}
-    limit:
-      attempt:
-        count: 3
+    backoff: { exponential: {} }
+    limit: { attempt: { count: 3 } }
 ```
+
+Valid inside `run.runner` and `run.function` (with `runnerName`) only.
 
 ## Runtime Expressions
 
-**IMPORTANT: No mixing of plain text and expressions.**
-A value must be **entirely** a runtime expression (`${...}` or `$${...}`) or entirely plain text.
-You **cannot** embed an expression inside a plain string like `"Bearer ${env.TOKEN}"`.
+**No mixing of plain text and expressions.** A value is either entirely `${...}` / `$${...}` or entirely plain text.
 
-- **WRONG**: `"Bearer ${env.API_TOKEN}"` — plain text mixed with jq expression
-- **CORRECT**: `"$${Bearer {{ env.API_TOKEN }}}"` — entire value is a Liquid template
-- **CORRECT**: `"${\"Bearer \" + env.API_TOKEN}"` — entire value is a jq expression with string concatenation
+- **WRONG**: `"Bearer ${env.API_TOKEN}"`
+- **CORRECT**: `"${\"Bearer \" + env.API_TOKEN}"` — jq concatenation
+- **CORRECT**: `"$${Bearer {{ token }}}"` — Liquid with a context variable
+- **WRONG**: `"$${Bearer {{ env.API_TOKEN }}}"` — Liquid cannot read environment variables
 
-When you need to combine static text with dynamic values, use **Liquid templates** (`$${...}`) which naturally support text interpolation, or use **jq string concatenation** within a single `${...}` expression.
+### jq: `${...}`
 
-### jq syntax: `${...}`
-
-Access and transform JSON data using jq expressions.
-
+<!-- validate:skip -->
 ```yaml
-# Direct data access (current task context)
-"${.key}"                    # Access field from current data
-"${.nested.field}"           # Nested field access
-"${.array[0]}"               # Array element
-
-# Context variable access (set by setTask/export)
-"${$myVariable}"             # Access context variable
-"${$myVariable.field}"       # Access field of context variable
-
-# Special context variables
-"${$workflow.input.key}"     # Access workflow input
-"${$workflow.id}"            # Workflow execution ID
-"${$task.input}"             # Current task input
-"${$task.raw_output}"        # Current task raw output
-"${$task.output}"            # Current task output
-"${$input.field}"            # Shorthand for previous/parent context (in output.as)
-"${env.ENV_VAR}"             # Environment variable access
-
-# jq operations
-"${.items | length}"         # Array length
-"${.a + .b}"                 # Arithmetic
-"${.text | gsub(\"old\"; \"new\")}"  # String replacement
-"${if .x then .y else .z end}"      # Conditional
-"${.items | map(.name)}"    # Map operation
-"${now | strftime(\"%Y-%m-%d\")}"   # Date formatting
-"${.text | fromjson}"       # Parse JSON string
-"${.data | tojson}"         # Serialize to JSON string
+"${.key}"  "${.nested.field}"  "${.array[0]}"
+"${$myVariable}"               # context variable
+"${$workflow.input.key}"       # workflow input
+"${$workflow.id}"
+"${$task.input}"  "${$task.raw_output}"  "${$task.output}"
+"${$input.field}"              # task input (in output.as)
+"${env.ENV_VAR}"               # environment variable (jq only)
+"${.items | length}"  "${.a + .b}"  "${.items | map(.name)}"
+"${if .x then .y else .z end}"
+"${now | strftime(\"%Y-%m-%d\")}"
+"${.text | fromjson}"          # strip ```json fences first
+"${.data | tojson}"
 ```
 
-### Liquid syntax: `$${...}`
+### Liquid: `$${...}`
 
-Use Liquid templates for string manipulation and control flow.
-
+<!-- validate:skip -->
 ```yaml
-# Variable access (context variables set by setTask/export)
 "$${{{ myVariable }}}"
 "$${{{ workflow.input.key }}}"
-
-# Conditionals
 "$${% if condition %}true{% else %}false{% endif %}"
-
-# Loops
 "$${% for item in items %}{{ item }}{% endfor %}"
-
-# Filters
-"$${{{ text | upcase }}}"
 "$${{{ text | slice: 0, 100 }}}"
-"$${{{ array | join: \", \" }}}"
 "$${{{ text | url_encode }}}"
 "$${{{ data | json_encode }}}"
-
-# Date
 "$${{{ 'now' | date: '%Y-%m-%d' }}}"
 ```
 
@@ -347,38 +448,30 @@ Use Liquid templates for string manipulation and control flow.
 |---------|-------------|-----------------|
 | JSON manipulation | Strong | Limited |
 | String templating | Limited | Strong |
-| Control flow | if/then/else/end | if/unless/for/case |
+| Environment variables | `env.NAME` | Not available |
 | Data access | `.key`, `$var` | `{{ var }}`, `{{ workflow.input.key }}` |
-| Complex computation | Yes (arithmetic, map, select, reduce) | Basic filters only |
-| Mixed text + data | Not suitable | Best choice |
 
 ## Flow Directives
 
 | Directive | Description |
 |-----------|-------------|
-| `continue` | Continue to next task (default) |
-| `exit` | Exit current task scope |
+| `continue` | Continue to the next task (default) |
+| `exit` | Exit the current task scope |
 | `end` | End workflow execution |
-| `wait` | Pause workflow (waiting state) |
-| `"TaskName"` | Jump to named task (runtime expression) |
+| `wait` | Pause the workflow (waiting state) |
+| `"TaskName"` | Jump to a named task |
 
 ## Input/Output/Export Pattern
 
-The data flow through tasks follows this pattern:
+1. `input.from` transforms the incoming data
+2. The task executes
+3. `output.as` shapes the result (`$input` = the task input)
+4. `export.as` writes context variables
 
-1. **input.from** transforms incoming data for the task
-2. Task executes with transformed input
-3. **output.as** transforms task result into desired shape
-4. **export.as** copies selected data into workflow context variables
-
-### Important: `$input` in output.as
-
-Inside `output.as`, `$input` refers to the task's input data (before the task executed). This enables preserving values from previous steps:
-
+<!-- validate:skip -->
 ```yaml
 output:
   as:
-    title: ${$input.title}        # Preserve title from input
-    summary: ${.content.text}     # Use new output from this task
-    link: ${$input.link}          # Preserve link from input
+    title: ${$input.title}
+    summary: ${.content.text}
 ```

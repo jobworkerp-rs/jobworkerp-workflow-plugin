@@ -1,0 +1,34 @@
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: named-timeout-catch
+  version: "0.0.1"
+
+use:
+  timeouts:
+    short:
+      after:
+        seconds: 30
+timeout:
+  after:
+    hours: 2
+do:
+  - guarded:
+      try:
+        - slow:
+            timeout: short
+            run:
+              function:
+                runnerName: COMMAND
+                arguments:
+                  command: ./long-job.sh
+      catch:
+        errors:
+          with:
+            type: https://open-workflow-specification.org/spec/1.0.0/errors/timeout
+        as: timeoutError
+        do:
+          - fallback:
+              set:
+                timedOut: true
+                reason: ${$timeoutError.title // "timeout"}

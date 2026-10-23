@@ -1,0 +1,53 @@
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: run-shell-container-workflow
+  version: "0.0.1"
+
+input:
+  schema:
+    document:
+      type: object
+      properties:
+        dir:
+          type: string
+do:
+  - listDir:
+      run:
+        shell:
+          command: ls
+          args: ["-la", "${.dir}"]
+          treatNonzeroAsError: true
+        return: all
+      output:
+        as:
+          exitCode: ${.code}
+          listing: ${.stdout}
+  - echoString:
+      run:
+        shell: echo hello
+  - inContainer:
+      run:
+        container:
+          image: alpine:3.20
+          command: ["sh", "-c", "echo $GREETING"]
+          env:
+            GREETING: hello
+          timeoutSec: 300
+        return: stdout
+  - notifyAsync:
+      run:
+        await: false
+        runner:
+          name: COMMAND
+          arguments:
+            command: logger
+            args: ["workflow finished"]
+  - child:
+      run:
+        workflow:
+          workflowUrl: ./child.yaml
+          input:
+            value: 1
+      output:
+        as: ${.output | fromjson}

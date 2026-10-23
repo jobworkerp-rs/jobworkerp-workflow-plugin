@@ -1,0 +1,15 @@
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: options-under-run
+  version: "0.0.1"
+
+do:
+  - echo:
+      run:
+        runner:
+          name: COMMAND
+          arguments:
+            command: echo
+        options:
+          channel: workflow

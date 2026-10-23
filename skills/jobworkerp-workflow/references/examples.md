@@ -212,6 +212,7 @@ Key patterns:
 
 Null-safe empty string check with whitespace trimming:
 
+<!-- validate:skip -->
 ```yaml
 - ProcessIfNotEmpty:
     if: '${.prompt // "" | gsub("^\\s+|\\s+$"; "") | length > 0}'
@@ -293,24 +294,23 @@ Using MCP servers configured in `mcp-settings.toml`:
     run:
       runner:
         name: mcp-fetch          # MCP server name from mcp-settings.toml
-        arguments:
-          argJson: |
-            $${{"url":"{{ url }}", "max_length": {{ max_length | default: 5000 }}}}
-          toolName: fetch          # Which tool to use on this MCP server
+        using: fetch             # Tool name (required for multi-tool servers)
+        arguments:               # The tool's own input fields
+          url: ${.url}
+          max_length: ${.max_length // 5000}
         options:
           channel: workflow
     output:
       as:
-        content: |
-          ${.content[0].text.text}
+        content: ${.content[0].text.text}
         link: ${$input.url}
 ```
 
 Key patterns:
 - **`name`**: MCP server name as configured in `mcp-settings.toml`
-- **`argJson`**: JSON string with Liquid template for argument construction
-- **`toolName`**: Specify which tool to use (required for multi-tool servers)
-- **Result access**: `${.content[0].text.text}` for first text content
+- **`using`**: Tool to call; may be omitted only for single-tool servers
+- **`arguments`**: Tool input fields written directly (no `argJson` / `toolName` wrapper); each value can be a runtime expression
+- **Result access**: `${.content[0].text.text}` for the first text content; check `${.isError}` for tool-reported errors
 
 MCP filesystem operations:
 
@@ -318,11 +318,10 @@ MCP filesystem operations:
 - CreateDirectory:
     run:
       runner:
-        name: filesystem           # MCP filesystem server
+        name: filesystem
+        using: create_directory
         arguments:
-          toolName: "create_directory"
-          argJson: |
-            $${{"path": "{{ workflow.input.output_dir }}"}}
+          path: ${$workflow.input.output_dir}
         options:
           channel: workflow
 
@@ -330,10 +329,10 @@ MCP filesystem operations:
     run:
       runner:
         name: filesystem
+        using: write_file
         arguments:
-          toolName: write_file
-          argJson: |
-            $${{"path": "{{ workflow.input.output_dir }}/result.md", "content": "{{ content | json_encode }}"}}
+          path: ${$workflow.input.output_dir + "/result.md"}
+          content: ${$content}
         options:
           channel: workflow
 ```
@@ -557,9 +556,12 @@ input:
           description: "Additional volume mounts (host:container format)"
       required: [agent_image, agent_cmd, workspace_path]
 do:
+  # Seed every variable read by `output.as`, so both the success and the
+  # failure path leave them defined.
   - initVars:
       set:
         agent_output: ""
+        error_message: null
 
   - runAgentWithErrorHandling:
       try:
@@ -580,8 +582,8 @@ do:
                   cmd: "${[$workflow.input.agent_cmd]}"
                   timeoutSec: 1800
                   treatNonzeroAsError: true
-              options:
-                channel: workflow
+                options:
+                  channel: workflow
             timeout:
               after:
                 minutes: 30
@@ -594,7 +596,7 @@ do:
         do:
           - setErrorState:
               set:
-                error_message: "${$caught_error.message // \"Container execution failed\"}"
+                error_message: "${$caught_error.detail // $caught_error.title // \"Container execution failed\"}"
 
 output:
   as:
@@ -610,7 +612,10 @@ Key patterns:
 - **`timeoutSec`**: Container-level timeout (in DockerArgs); combine with task-level `timeout.after`
 - **`treatNonzeroAsError: true`**: Treat non-zero exit codes as failures
 - **tryTask wrapping**: Always wrap DOCKER tasks in tryTask for cleanup on failure
+- **Caught error fields**: `type`, `status`, `title`, `detail`, `instance` (there is no `message`)
+- **Seeded variables**: `initVars` defines every variable `output.as` reads, otherwise the unused path leaves it undefined
 - **Result access**: `stdout`, `stderr`, `exitCode` available in output (same as COMMAND)
+- **Simpler alternative**: the `run.container` task form (see §23) when you only need image/command/env
 - **`settings.fromImage`** vs **`arguments.image`**: settings is for worker initialization (image pull), arguments is per-job (only effective when `useStatic: false`)
 
 ## 17. GRPC Runner - gRPC API Calls
@@ -631,14 +636,13 @@ Call gRPC services from a workflow. Use `using: unary` for regular RPCs and `usi
           useReflection: true        # Use gRPC reflection for dynamic message construction
         arguments:
           method: "mypackage.MyService/GetData"
-          jsonBody: |
-            $${{"id": "{{ item_id }}", "include_details": true}}
+          jsonBody: '${ {id: $item_id, include_details: true} | tojson }'
           metadata:
-            authorization: "$${Bearer {{ env.API_TOKEN }}}"
+            authorization: ${"Bearer " + env.API_TOKEN}   # env is jq-only; Liquid cannot read it
           timeout: 5000
           asJson: true               # Convert protobuf response to JSON
-      options:
-        channel: workflow
+        options:
+          channel: workflow
     output:
       as:
         data: ${.jsonBody | fromjson}
@@ -646,7 +650,9 @@ Call gRPC services from a workflow. Use `using: unary` for regular RPCs and `usi
 ```
 
 Key patterns:
-- **`useReflection: true`**: Enables dynamic message construction from `jsonBody` (otherwise pass raw protobuf bytes via `body`)
+- **`useReflection: true`**: Enables dynamic message construction from `jsonBody` (alternatively `settings.proto.source` supplies a descriptor; raw protobuf goes in `body` as base64)
+- **Settings override arguments**: `method` / `metadata` / `timeout` / `asJson` set in `settings` win over the same fields in `arguments`
+- **Simpler alternative**: `call: grpc` (see §22) for unary calls with reflection
 - **`asJson: true`**: Converts protobuf response to JSON in `jsonBody` field
 - **`method` format**: `"package.Service/Method"` - full gRPC method path
 - **Result fields**: `code` (gRPC status, 0=OK), `jsonBody` (if asJson), `body` (unary raw bytes), `metadata`, `message`
@@ -682,8 +688,8 @@ Run Python scripts with automatic dependency management via `uv`:
           dataBody: |
             ${.data | tojson}
           withStderr: true
-      options:
-        channel: workflow
+        options:
+          channel: workflow
     output:
       as:
         analysis: ${.output | fromjson}
@@ -706,9 +712,9 @@ With external script and requirements:
             API_KEY: "${env.API_KEY}"
           dataBody: "${.input_data | tojson}"
           withStderr: true
-      options:
-        channel: workflow
-        storeFailure: true
+        options:
+          channel: workflow
+          storeFailure: true
 ```
 
 Key patterns:
@@ -720,12 +726,23 @@ Key patterns:
 
 ## 19. WORKFLOW Runner - Nested Workflow Execution
 
-Execute sub-workflows from a parent workflow using the unified `WORKFLOW` runner:
-
-Inline sub-workflow execution:
+Nested execution with the `run.workflow` task form (preferred; the parent context is inherited):
 
 ```yaml
 - RunSubWorkflow:
+    run:
+      workflow:
+        workflowUrl: "${$workflow.input.sub_workflow_path}"
+        input: ${.data}            # non-string values are serialized as JSON
+    output:
+      as:
+        sub_result: ${.output | fromjson}
+```
+
+The same through the `WORKFLOW` runner (needed for worker options or an explicit `workflowContext`):
+
+```yaml
+- RunSubWorkflowViaRunner:
     run:
       runner:
         name: WORKFLOW
@@ -733,8 +750,9 @@ Inline sub-workflow execution:
           workflowUrl: "${$workflow.input.sub_workflow_path}"
         arguments:
           input: "${.data | tojson}"
-      options:
-        channel: workflow
+          workflowContext: '{"mode": "batch"}'
+        options:
+          channel: workflow
     output:
       as:
         sub_result: ${.output | fromjson}
@@ -756,8 +774,8 @@ Create a reusable workflow worker dynamically:
             responseType: "DIRECT"
             storeSuccess: true
             storeFailure: true
-      options:
-        channel: workflow
+        options:
+          channel: workflow
     export:
       as:
         created_worker_id: ${.workerId.value}
@@ -775,6 +793,7 @@ Then use the created worker via `runWorker`:
 ```
 
 Key patterns:
+- **`run.workflow`**: Simplest nesting; `workflowContext` is not a DSL field (inherited from the parent)
 - **`using: run`** (default): Execute a workflow definition
 - **`using: create`**: Register a workflow as a reusable worker
 - **`settings.workflowUrl`** or **`settings.workflowData`**: Pre-configure workflow source (optional for `run`)
@@ -822,15 +841,11 @@ do:
           content: ${.content}
           url: ${$workflow.input.url}
 
-  # Step 2: Guard - skip if empty
-  - CheckContent:
-      if: '${.content // "" | length > 100}'
-      set:
-        contentReady: true
-
-  # Step 3: Summarize with LLM
+  # Step 2: Summarize with LLM, guarded directly on the data.
+  # (A separate `set` guard task would replace `.content` with the set values,
+  # and when skipped by `if` it would leave its variable undefined.)
   - Summarize:
-      if: '${$contentReady == true}'
+      if: '${.content // "" | length > 100}'
       run:
         runner:
           name: LLM
@@ -862,3 +877,176 @@ output:
     url: ${.url}
     summary: ${.summary}
 ```
+
+## 21. call: http with Secret-Based Authentication
+
+```yaml
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: github-repo-info
+  version: "0.0.1"
+use:
+  secrets:
+    - github-token              # value from env WORKFLOW_SECRET_GITHUB_TOKEN
+  authentications:
+    github:
+      bearer:
+        use: github-token
+do:
+  - getRepo:
+      call: http
+      with:
+        method: get
+        endpoint:
+          uri: https://api.github.com/repos/jobworkerp-rs/jobworkerp-rs
+          authentication:
+            use: github
+        headers:
+          Accept: application/vnd.github+json
+        output: response        # {statusCode, headers, body}
+      output:
+        as:
+          status: ${.statusCode}
+          stars: ${.body.stargazers_count}
+```
+
+Key patterns:
+- **Secrets never appear in YAML**: declare the name under `use.secrets`, provide `WORKFLOW_SECRET_<UPPER_SNAKE_NAME>` in the worker environment
+- **Named policy**: `use.authentications` + `authentication: { use: <name> }`; inline `bearer: { token: "${ $secrets.api_token }" }` also works (call tasks only)
+- **`output: content`** (default) returns just the body (JSON-parsed for JSON responses)
+
+## 22. call: grpc (Unary via Reflection)
+
+```yaml
+- getUser:
+    call: grpc
+    with:
+      service:
+        name: example.UserService
+        host: localhost
+        port: 50051
+      method: GetUser
+      arguments:
+        id: ${.userId}
+    output:
+      as:
+        user: ${.body}          # JSON-parsed response
+        grpcCode: ${.code}
+```
+
+The server must expose reflection. Only bearer authentication is supported; server streaming is not (use the GRPC runner with `using: streaming`).
+
+## 23. Process Tasks: run.shell / run.container, return and await
+
+```yaml
+- listDir:
+    run:
+      shell:
+        command: ls
+        args: ["-la", "${.dir}"]
+        treatNonzeroAsError: true   # default false: non-zero exit does not fail the task
+      return: all                   # {code, stdout, stderr}
+    output:
+      as:
+        exitCode: ${.code}
+        listing: ${.stdout}
+- inContainer:
+    run:
+      container:
+        image: alpine:3.20
+        command: ["sh", "-c", "echo $GREETING"]
+        env:
+          GREETING: hello
+        timeoutSec: 300
+      return: stdout                # raw string (not parsed as JSON)
+- notifyAsync:
+    run:
+      await: false                  # fire-and-forget; task output = task input
+      runner:
+        name: COMMAND
+        arguments:
+          command: logger
+          args: ["workflow finished"]
+```
+
+Key patterns:
+- **`return`** exists only on `shell` / `container` / `script`
+- **`await: false`** works on every `run.*` form but not together with `useStreaming: true`
+- To consume JSON printed by a process, parse it explicitly: `${.stdout | fromjson}` (after `return: all`) or `${. | fromjson}`
+
+## 24. Named Timeouts and Catching Timeout Errors
+
+```yaml
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: guarded-long-job
+  version: "0.0.1"
+use:
+  timeouts:
+    short:
+      after:
+        seconds: 30
+timeout:                        # whole workflow; not a default for inner tasks
+  after:
+    hours: 2
+do:
+  - guarded:
+      try:
+        - slow:
+            timeout: short      # reference to use.timeouts
+            run:
+              function:
+                runnerName: COMMAND
+                arguments:
+                  command: ./long-job.sh
+      catch:
+        errors:
+          with:
+            type: https://open-workflow-specification.org/spec/1.0.0/errors/timeout
+        as: timeoutError
+        do:
+          - fallback:
+              set:
+                timedOut: true
+                reason: ${$timeoutError.title // "timeout"}
+```
+
+Key patterns:
+- **Timeouts are opt-in**; a timed-out task raises the spec timeout error (status 408) and cancels its own child jobs
+- **`WORKFLOW_TASK_DEFAULT_TIMEOUT_SEC`** (if set) applies only to run/call tasks without `timeout`
+
+## 25. Rethrowing and Raising Errors
+
+```yaml
+- callUpstream:
+    try:
+      - fetch:
+          run:
+            runner:
+              name: HTTP_REQUEST
+              settings:
+                baseUrl: https://api.example.com
+              arguments:
+                method: GET
+                path: /data
+    catch:
+      as: error
+      do:
+        - rethrow:
+            if: ${ $error.status != 404 }
+            raise:
+              error: "${ $error }"   # Error object → raised unchanged
+        - notFound:
+            raise:
+              error:
+                type: https://example.invalid/errors/not-found
+                status: 404
+                title: Upstream resource missing
+                detail: ${ "status=" + ($error.status | tostring) }
+```
+
+Key patterns:
+- **String `raise.error`** is a runtime expression: an Error object result is rethrown as-is, a string result becomes the `detail` of a status-500 error
+- **`title` / `detail`** of an inline error accept runtime expressions (must evaluate to strings)

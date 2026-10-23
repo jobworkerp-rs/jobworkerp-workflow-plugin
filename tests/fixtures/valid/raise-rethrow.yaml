@@ -1,0 +1,32 @@
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: raise-rethrow
+  version: "0.0.1"
+
+do:
+  - callUpstream:
+      try:
+        - fetch:
+            run:
+              runner:
+                name: HTTP_REQUEST
+                settings:
+                  baseUrl: https://api.example.com
+                arguments:
+                  method: GET
+                  path: /data
+      catch:
+        as: error
+        do:
+          - rethrow:
+              if: ${ $error.status != 404 }
+              raise:
+                error: "${ $error }"
+          - notFound:
+              raise:
+                error:
+                  type: https://example.invalid/errors/not-found
+                  status: 404
+                  title: Upstream resource missing
+                  detail: ${ "status=" + ($error.status | tostring) }
