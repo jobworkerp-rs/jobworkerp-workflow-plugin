@@ -1,7 +1,9 @@
 """Regression tests for scripts/validate_examples.py.
 
-`check-jsonschema` is replaced by a stub on PATH that rejects any file
-containing the word INVALID, so the tests run without the real tool.
+`check-jsonschema` is replaced by a stub on PATH that mimics its `-o json`
+output, so the tests run without the real tool. The stub decides the result
+from markers in the validated file: INVALID (schema violation), BROKEN (YAML
+parse error) or CRASH (tool failure without JSON output).
 """
 
 from __future__ import annotations
@@ -33,15 +35,23 @@ def load_module():
 ve = load_module()
 
 STUB = """#!/bin/sh
-# argv: --schemafile <schema> <target>
+# The validated file is the last argument.
+for target; do :; done
+name=$(basename "$target")
 # Record what was validated (order and content) so tests observe it from outside.
-printf '%s\\n' "$3" >> "$STUB_LOG"
-cp "$3" "$STUB_CAPTURE/"
-if grep -q INVALID "$3"; then
-  echo "stub rejected $(basename "$3")"
+printf '%s\\n' "$target" >> "$STUB_LOG"
+cp "$target" "$STUB_CAPTURE/"
+if grep -q CRASH "$target"; then
+  echo "Traceback: boom" >&2
+  exit 1
+elif grep -q BROKEN "$target"; then
+  printf '{"status":"fail","errors":[],"parse_errors":[{"filename":"%s","message":"Failed to parse %s"}]}' "$target" "$name"
+  exit 1
+elif grep -q INVALID "$target"; then
+  printf '{"status":"fail","errors":[{"filename":"%s","path":"$.do[0]","message":"stub rejected %s","best_deep_match":{"path":"$.do[0].run","message":"deep reason"}}],"parse_errors":[]}' "$target" "$name"
   exit 1
 fi
-echo ok
+printf '{"status":"ok","errors":[]}'
 """
 
 FULL_WORKFLOW = textwrap.dedent(
@@ -146,15 +156,55 @@ class ToWorkflowTest(unittest.TestCase):
     def test_placeholder_marks_block_as_fragment(self):
         self.assertIsNone(ve.to_workflow("- a:\n    run: ...\n"))
 
+    def test_do_fragment_gets_document_header(self):
+        fragment = "# loop\ndo:\n  - a: {}\n"
+        self.assertEqual(ve.to_workflow(fragment), ve.DOCUMENT_HEADER + fragment)
+
     def test_other_fragments_are_skipped(self):
         for text in [
             "run:\n  runner: {}\n",
-            "do:\n  - a: {}\n",
             "# only comment\n",
             "",
         ]:
             with self.subTest(text=text):
                 self.assertIsNone(ve.to_workflow(text))
+
+
+class ClassifyTest(unittest.TestCase):
+    def test_ok_status_is_valid(self):
+        self.assertEqual(
+            ve.classify('{"status": "ok", "errors": []}', ""), (ve.Outcome.VALID, "")
+        )
+
+    def test_schema_errors_are_rejected_with_path_and_deepest_match(self):
+        stdout = (
+            '{"status": "fail", "parse_errors": [], "errors": ['
+            '{"path": "$.do[0]", "message": "top",'
+            ' "best_deep_match": {"path": "$.do[0].run", "message": "deep"}},'
+            '{"path": "$.use", "message": "other"}]}'
+        )
+        self.assertEqual(
+            ve.classify(stdout, ""),
+            (
+                ve.Outcome.REJECTED,
+                "$.do[0]: top\n  best match: $.do[0].run: deep\n$.use: other",
+            ),
+        )
+
+    def test_parse_errors_are_errors_not_rejections(self):
+        stdout = '{"status": "fail", "errors": [], "parse_errors": [{"message": "bad yaml"}]}'
+        self.assertEqual(ve.classify(stdout, ""), (ve.Outcome.ERROR, "bad yaml"))
+
+    def test_failure_without_any_error_detail_falls_back_to_raw_output(self):
+        stdout = '{"status": "fail", "errors": [], "parse_errors": []}'
+        self.assertEqual(
+            ve.classify(stdout, "warn\n"), (ve.Outcome.ERROR, stdout + "warn")
+        )
+
+    def test_non_json_output_is_an_error_with_raw_output(self):
+        self.assertEqual(
+            ve.classify("", "Traceback: boom\n"), (ve.Outcome.ERROR, "Traceback: boom")
+        )
 
 
 class MainTest(PluginRootTestCase):
@@ -241,9 +291,15 @@ class MainTest(PluginRootTestCase):
         self.assertEqual(code, 1)
         self.assertEqual(
             out,
-            "FAIL doc0.md:1: schema violation\nstub rejected block-0.yaml\n\n"
-            "FAIL fixtures/valid/a.yaml: expected valid\nstub rejected a.yaml\n\n"
-            "FAIL fixtures/valid/b.yaml: expected valid\nstub rejected b.yaml\n\n"
+            "FAIL doc0.md:1: schema violation\n"
+            "$.do[0]: stub rejected block-0.yaml\n"
+            "  best match: $.do[0].run: deep reason\n\n"
+            "FAIL fixtures/valid/a.yaml: expected valid\n"
+            "$.do[0]: stub rejected a.yaml\n"
+            "  best match: $.do[0].run: deep reason\n\n"
+            "FAIL fixtures/valid/b.yaml: expected valid\n"
+            "$.do[0]: stub rejected b.yaml\n"
+            "  best match: $.do[0].run: deep reason\n\n"
             "FAIL fixtures/invalid/accepted.yaml: expected schema rejection but it passed\n\n"
             "checked=6 skipped_fragments=0 failed=4\n",
         )
@@ -272,6 +328,35 @@ class MainTest(PluginRootTestCase):
         )
         for block_file in targets[:2]:
             self.assertFalse(Path(block_file).exists())
+
+    def test_invalid_fixture_counts_only_schema_violations_as_rejection(self):
+        self.add_fixture("invalid", "broken.yaml", "BROKEN\n")
+        self.add_fixture("invalid", "crash.yaml", "CRASH\n")
+        self.add_fixture("invalid", "rejected.yaml", "INVALID\n")
+        self.set_docs()
+        code, out, _ = self.run_main()
+        self.assertEqual(code, 1)
+        self.assertEqual(
+            out,
+            "FAIL fixtures/invalid/broken.yaml: "
+            "expected schema rejection but validation did not run\n"
+            "Failed to parse broken.yaml\n\n"
+            "FAIL fixtures/invalid/crash.yaml: "
+            "expected schema rejection but validation did not run\n"
+            "Traceback: boom\n\n"
+            "checked=3 skipped_fragments=0 failed=2\n",
+        )
+
+    def test_markdown_block_that_cannot_be_validated_is_reported(self):
+        self.set_docs("```yaml\n- BROKEN: {}\n```\n")
+        code, out, _ = self.run_main()
+        self.assertEqual(code, 1)
+        self.assertEqual(
+            out,
+            "FAIL doc0.md:1: could not be validated\n"
+            "Failed to parse block-0.yaml\n\n"
+            "checked=1 skipped_fragments=0 failed=1\n",
+        )
 
     def test_wrapped_fragment_is_what_gets_validated(self):
         self.set_docs("```yaml\n- a: {}\n```\n")

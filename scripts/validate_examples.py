@@ -11,12 +11,14 @@ Requires `check-jsonschema` on PATH. Uses only the Python standard library.
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
@@ -30,16 +32,17 @@ MARKDOWN_FILES = [
 FIXTURES = PLUGIN_ROOT / "tests" / "fixtures"
 SKIP_MARKER = "<!-- validate:skip -->"
 
-# Task fragments (`- Name:` lists) are wrapped into a minimal workflow so they can be
-# validated in isolation; the task list is nested under `do:` with two extra spaces.
-WRAPPER_HEADER = (
+# Fragments get a minimal `document` so they can be validated in isolation: a block
+# starting with `do:` is prefixed as-is, and a task list (`- Name:`) is additionally
+# nested under `do:` with two extra spaces.
+DOCUMENT_HEADER = (
     "document:\n"
     '  dsl: "0.0.1"\n'
     "  namespace: default\n"
     "  name: fragment\n"
     '  version: "0.0.1"\n'
-    "do:\n"
 )
+WRAPPER_HEADER = DOCUMENT_HEADER + "do:\n"
 
 FENCE_RE = re.compile(r"^```yaml\s*$")
 # A bare `...` placeholder marks an intentionally incomplete snippet.
@@ -95,6 +98,8 @@ def to_workflow(text: str) -> str | None:
     head = first_content_line(text)
     if head.startswith("document:"):
         return text
+    if head.startswith("do:"):
+        return DOCUMENT_HEADER + text
     if head.startswith("- "):
         return WRAPPER_HEADER + "".join(
             f"  {line}\n" if line else "\n" for line in text.splitlines()
@@ -102,14 +107,49 @@ def to_workflow(text: str) -> str | None:
     return None
 
 
-def validate(path: Path) -> tuple[bool, str]:
+class Outcome(Enum):
+    VALID = "valid"
+    REJECTED = "rejected"  # schema violation
+    ERROR = "error"  # YAML parse error or the checker itself failed
+
+
+def format_schema_error(error: dict) -> str:
+    text = f"{error.get('path', '$')}: {error.get('message', '')}"
+    # The top-level message of a oneOf mismatch is uninformative; the deepest
+    # match usually names the offending property.
+    deep = error.get("best_deep_match")
+    if deep:
+        text += f"\n  best match: {deep.get('path', '$')}: {deep.get('message', '')}"
+    return text
+
+
+def classify(stdout: str, stderr: str) -> tuple[Outcome, str]:
+    """Interpret `check-jsonschema -o json` output as an outcome and a diagnostic."""
+    raw = (stdout + stderr).strip()
+    try:
+        result = json.loads(stdout)
+    except ValueError:
+        return Outcome.ERROR, raw
+    if result.get("status") == "ok":
+        return Outcome.VALID, ""
+    parse_errors = result.get("parse_errors") or []
+    errors = result.get("errors") or []
+    if parse_errors or not errors:
+        detail = "\n".join(e.get("message", "") for e in parse_errors)
+        return Outcome.ERROR, detail or raw
+    return Outcome.REJECTED, "\n".join(format_schema_error(e) for e in errors)
+
+
+def validate(path: Path) -> tuple[Outcome, str]:
+    # JSON output is used because check-jsonschema exits 1 for schema
+    # violations, parse errors and its own failures alike.
     proc = subprocess.run(
-        ["check-jsonschema", "--schemafile", str(SCHEMA), str(path)],
+        ["check-jsonschema", "-o", "json", "--schemafile", str(SCHEMA), str(path)],
         check=False,
         capture_output=True,
         text=True,
     )
-    return proc.returncode == 0, (proc.stdout + proc.stderr).strip()
+    return classify(proc.stdout, proc.stderr)
 
 
 @dataclass
@@ -133,25 +173,33 @@ def check_markdown_examples(report: Report) -> None:
                 target.write_text(workflow, encoding="utf-8")
                 validated += 1
                 report.checked += 1
-                ok, out = validate(target)
-                if not ok:
-                    report.failures.append(
-                        f"{block.source}:{block.line}: schema violation\n{out}"
-                    )
+                outcome, out = validate(target)
+                if outcome is Outcome.VALID:
+                    continue
+                reason = (
+                    "schema violation"
+                    if outcome is Outcome.REJECTED
+                    else "could not be validated"
+                )
+                report.failures.append(f"{block.source}:{block.line}: {reason}\n{out}")
 
 
 def check_fixtures(kind: str, report: Report, *, expect_valid: bool) -> None:
     for fixture in sorted((FIXTURES / kind).glob("*.yaml")):
         report.checked += 1
-        ok, out = validate(fixture)
-        if ok == expect_valid:
-            continue
+        outcome, out = validate(fixture)
         name = fixture.relative_to(PLUGIN_ROOT)
-        report.failures.append(
-            f"{name}: expected valid\n{out}"
-            if expect_valid
-            else f"{name}: expected schema rejection but it passed"
-        )
+        if expect_valid:
+            if outcome is not Outcome.VALID:
+                report.failures.append(f"{name}: expected valid\n{out}")
+        elif outcome is Outcome.VALID:
+            report.failures.append(f"{name}: expected schema rejection but it passed")
+        elif outcome is Outcome.ERROR:
+            # Only a schema violation proves the fixture is rejected for the
+            # intended reason; a parse error or checker failure proves nothing.
+            report.failures.append(
+                f"{name}: expected schema rejection but validation did not run\n{out}"
+            )
 
 
 def main() -> int:

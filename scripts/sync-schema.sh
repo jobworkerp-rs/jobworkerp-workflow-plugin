@@ -5,9 +5,15 @@
 #   --check  Do not copy; exit 1 if the bundled copies differ from upstream.
 set -euo pipefail
 
-if [[ $# -lt 1 ]]; then
+usage() {
   echo "usage: $0 <jobworkerp-rs-root> [--check]" >&2
   exit 2
+}
+
+# Reject anything but an optional --check so a mistyped flag never falls
+# through to overwriting the bundled schemas.
+if [[ $# -lt 1 || $# -gt 2 ]] || [[ $# -eq 2 && "$2" != "--check" ]]; then
+  usage
 fi
 
 upstream_root=$1
