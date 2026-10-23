@@ -198,16 +198,17 @@ using: embedding
 arguments:
   model: "nomic-embed-text"    # Optional override
   inputs:
-    - text: "first document"
-    # OR image: { contentType, source: { url | base64 } } / media: { contentType, source }
+    - text: "first document"   # Only text inputs are supported at runtime
   options:
     dimensions: 768
     truncate: "END"
     embeddingType: "..."
-    encodingFormat: "float"
+    encodingFormat: "float"    # Only float; other values are ignored (provider default)
     user: "..."
   chunking: { maxChunkTokens: 512 }   # Overrides settings.embeddingChunking
 ```
+
+The protobuf also defines `image` / `media` inputs, but the runner currently fails with "non-text embedding input ... is not supported yet". Use `text` only.
 
 ### Arguments for `using: token_count` (TokenCountArgs)
 
@@ -218,6 +219,10 @@ arguments:
   # OR completion: { prompt: "..." }          # LLMCompletionArgs
   # OR chat: { request: { messages: [...] } } # LLMChatArgs
 ```
+
+Exact counts need provider support; otherwise the job still succeeds but the result is `error` with code `TOKEN_COUNT_EXACT_UNAVAILABLE`:
+- `text`: only `genai` settings with an OpenAI-compatible server given by `baseUrl`
+- `completion` / `chat`: `genai` with OpenAI (custom `baseUrl` only), OpenAI Responses, Anthropic, or Gemini models. Not available with `ollama`.
 
 ### Results
 
