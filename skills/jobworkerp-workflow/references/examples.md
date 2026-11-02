@@ -904,17 +904,43 @@ do:
             use: github
         headers:
           Accept: application/vnd.github+json
-        output: response        # {statusCode, headers, body}
+        output: response        # {request, statusCode, headers, content}
       output:
         as:
           status: ${.statusCode}
-          stars: ${.body.stargazers_count}
+          stars: ${.content.stargazers_count}
 ```
 
 Key patterns:
 - **Secrets never appear in YAML**: declare the name under `use.secrets`, provide `WORKFLOW_SECRET_<UPPER_SNAKE_NAME>` in the worker environment
 - **Named policy**: `use.authentications` + `authentication: { use: <name> }`; inline `bearer: { token: "${ $secrets.api_token }" }` also works (call tasks only)
 - **`output: content`** (default) returns just the body (JSON-parsed for JSON responses)
+- **Non-2xx fails the task**: a status outside 200–299 (200–399 with `redirect: true`) raises a `communication` error carrying the response status, so `statusCode` in the output is always a success status. Handle expected failures with `try`/`catch`:
+
+```yaml
+- fetchItem:
+    try:
+      - get:
+          call: http
+          with:
+            method: get
+            endpoint: https://api.example.com/items/1
+          output:
+            as:
+              found: true
+              item: ${.}
+    catch:
+      errors:
+        with:
+          type: https://open-workflow-specification.org/spec/1.0.0/errors/communication
+          status: 404
+      as: notFound
+      do:
+        - markMissing:
+            set:
+              found: false
+              reason: ${ $notFound.title }    # e.g. "HTTP 404 Not Found"; $notFound.detail holds the body
+```
 
 ## 22. call: grpc (Unary via Reflection)
 
@@ -935,7 +961,7 @@ Key patterns:
         grpcCode: ${.code}
 ```
 
-The server must expose reflection. Only bearer authentication is supported; server streaming is not (use the GRPC runner with `using: streaming`).
+A non-OK status fails the task (`communication` error with the mapped HTTP status, or `timeout` for `DEADLINE_EXCEEDED`), so `code` is 0 on output. The server must expose reflection. Only bearer authentication is supported; server streaming is not (use the GRPC runner with `using: streaming`).
 
 ## 23. Process Tasks: run.shell / run.container, return and await
 

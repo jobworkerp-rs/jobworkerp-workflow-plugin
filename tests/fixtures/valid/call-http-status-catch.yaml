@@ -1,0 +1,33 @@
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: call-http-status-catch
+  version: "0.0.1"
+
+do:
+  - fetchItem:
+      try:
+        - get:
+            call: http
+            with:
+              method: get
+              endpoint: https://api.example.com/items/1
+              redirect: true
+              output: response
+            output:
+              as:
+                found: true
+                status: ${.statusCode}
+                item: ${.content}
+      catch:
+        errors:
+          with:
+            type: https://open-workflow-specification.org/spec/1.0.0/errors/communication
+            status: 404
+        as: notFound
+        do:
+          - markMissing:
+              set:
+                found: false
+                status: ${ $notFound.status }
+                reason: ${ $notFound.title }
