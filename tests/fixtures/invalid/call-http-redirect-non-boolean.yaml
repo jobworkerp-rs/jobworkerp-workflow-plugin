@@ -1,0 +1,13 @@
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: call-http-redirect-non-boolean
+  version: "0.0.1"
+
+do:
+  - fetch:
+      call: http
+      with:
+        method: get
+        endpoint: https://example.com
+        redirect: "yes"

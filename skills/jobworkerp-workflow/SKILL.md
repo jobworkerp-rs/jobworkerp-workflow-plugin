@@ -168,7 +168,9 @@ See [Schema Reference](references/schema-reference.md#runtask) for all fields.
       output: response             # content (default) | response
 ```
 
-`call: grpc` takes `service` (name/host/port), `method`, `arguments` (requires server reflection). Secret values are never written in YAML: declare names under `use.secrets` and supply `WORKFLOW_SECRET_<UPPER_SNAKE_NAME>` env vars. See [Schema Reference](references/schema-reference.md#calltask).
+`output: response` yields `{ request: { method, uri, headers }, statusCode, headers, content }`. A final status outside 200–299 (200–399 with `redirect: true`) raises a `communication` error carrying the response status; branch on it with `try`/`catch`, not on `statusCode`.
+
+`call: grpc` takes `service` (name/host/port), `method`, `arguments` (requires server reflection); a non-OK status raises an error. Secret values are never written in YAML: declare names under `use.secrets` and supply `WORKFLOW_SECRET_<UPPER_SNAKE_NAME>` env vars. See [Schema Reference](references/schema-reference.md#calltask).
 
 ## Runner Quick Reference
 

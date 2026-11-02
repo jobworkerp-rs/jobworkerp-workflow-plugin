@@ -261,7 +261,7 @@ arguments:
 
 ### Result (HttpResponseResult)
 
-`statusCode`, `headers`, `content` (string body). Streaming execution yields `chunk` items.
+`statusCode`, `headers`, `content` (string body). Streaming execution yields `chunk` items. The runner returns any received response (including 4xx/5xx) as result data; only the `call: http` task turns an unaccepted status into an error.
 
 ---
 
@@ -317,6 +317,8 @@ arguments:
 
 - unary: `metadata`, `body`, `code`, `message`, `jsonBody`
 - streaming: `metadata`, `code`, `message`, and `jsonBody` or `bodies.items`
+
+The runner returns a non-OK `code` as result data; only the `call: grpc` task turns it into an error.
 
 ---
 

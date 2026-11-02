@@ -196,11 +196,14 @@ The parent `workflow_context` is inherited implicitly (`workflowContext` is not 
       query: { page: 1 }
       body: { name: "x" }          # non-string bodies are sent as JSON
       output: content              # content (default) | response
+      redirect: false              # true also accepts 3xx as success
 ```
 
 - `output: content` → response body (JSON-parsed when the content type is JSON).
-- `output: response` → `{ statusCode, headers, body }`.
-- Supported auth: bearer and basic. Not supported: digest / oauth2 / oidc / certificate, `output: raw`. `redirect` is accepted but ignored.
+- `output: response` → `{ request: { method, uri, headers }, statusCode, headers, content }`. `request` echoes what was sent with credentials masked (`***`); repeated response headers are joined with `, `.
+- Status check: redirects are followed automatically and the final status is checked. Outside 200–299 (or 200–399 with `redirect: true`) the task fails with a `communication` error (`https://open-workflow-specification.org/spec/1.0.0/errors/communication`) whose `status` is the response status, `title` is like `HTTP 404 Not Found`, and `detail` is the response body (up to 64 KiB, secrets masked). Handle expected statuses with `try`/`catch` (e.g. `errors.with.status: 404`).
+- Running the HTTP_REQUEST runner directly (`run.runner`) still returns any received response as data.
+- Supported auth: bearer and basic. Not supported: digest / oauth2 / oidc / certificate, `output: raw`.
 
 #### call: grpc
 
@@ -220,7 +223,8 @@ The parent `workflow_context` is inherited implicitly (`workflowContext` is not 
 ```
 
 - Unary only, through the GRPC runner with server reflection. `proto` is accepted by the schema but rejected at run time.
-- Output: `{ code, body, metadata, message? }` where `body` is the JSON-parsed response.
+- Output on success: `{ code, body, metadata, message? }` where `body` is the JSON-parsed response.
+- A non-OK status fails the task: `DEADLINE_EXCEEDED` raises a `timeout` error; any other code raises a `communication` error whose `status` follows the grpc-gateway mapping (e.g. `NOT_FOUND` → 404, `UNAVAILABLE` → 503), with a title like `gRPC NOT_FOUND` and the status message as `detail`.
 
 ### forTask
 
