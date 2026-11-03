@@ -8,14 +8,10 @@ do:
   - callUpstream:
       try:
         - fetch:
-            run:
-              runner:
-                name: HTTP_REQUEST
-                settings:
-                  baseUrl: https://api.example.com
-                arguments:
-                  method: GET
-                  path: /data
+            call: http
+            with:
+              method: get
+              endpoint: https://api.example.com/data
       catch:
         as: error
         do:

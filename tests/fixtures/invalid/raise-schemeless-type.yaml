@@ -1,0 +1,12 @@
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: raise-schemeless-type
+  version: "0.0.1"
+
+do:
+  - fail:
+      raise:
+        error:
+          type: badargument
+          status: 400

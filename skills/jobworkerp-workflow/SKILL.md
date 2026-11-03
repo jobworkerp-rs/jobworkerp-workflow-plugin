@@ -151,6 +151,7 @@ Add `using: <method>` inside `runner` for multi-method runners (LLM, GRPC, WORKF
 
 - `run.shell` / `run.container` do **not** fail on a non-zero exit by default; set `treatNonzeroAsError: true` (optionally with `successExitCodes`).
 - `run.script` always fails on a non-zero exit and does not support `useStreaming: true`.
+- `run.workflow` raises the child's error (`type`/`status`/`title`) when the child fails, so a parent `try` can catch types the child `raise`s.
 
 See [Schema Reference](references/schema-reference.md#runtask) for all fields.
 
@@ -343,6 +344,7 @@ See [Runner Schemas](references/runner-schemas.md#querying-runner-schemas-at-run
 3. **Removed runners**: `GRPC_UNARY`, `LLM_COMPLETION`, `LLM_CHAT`, `INLINE_WORKFLOW`, `REUSABLE_WORKFLOW`, `CREATE_WORKFLOW` — use `GRPC`, `LLM`, `WORKFLOW` with `using`.
 4. **Field names in settings/arguments**: camelCase is conventional (`baseUrl`, `maxTokens`); snake_case is accepted too. **Unknown fields are silently ignored**, so double-check spelling against [Runner Schemas](references/runner-schemas.md). Runner results use camelCase keys, and 64-bit integers appear as strings.
 5. **Timeouts are opt-in**: a task without `timeout` has no deadline. `WORKFLOW_TASK_DEFAULT_TIMEOUT_SEC` applies only to run/call tasks without `timeout`; the workflow-level `timeout` is not inherited by inner tasks. A timeout raises `https://open-workflow-specification.org/spec/1.0.0/errors/timeout` (status 408), catchable with `try`, and cancels child jobs inside the timed-out task. See [Schema Reference](references/schema-reference.md#timeouts-and-child-job-cancellation).
-6. **Schema validation** is enabled by default at runtime (`WORKFLOW_SKIP_SCHEMA_VALIDATION=true` skips it). Plugin runners must still validate their own inputs.
-7. **Upstream docs**: `manual/en/src/workflow.md` (and `manual/ja/src/workflow.md`) in jobworkerp-rs.
-8. **Schema sync**: the bundled schemas are refreshed with `scripts/sync-schema.sh <jobworkerp-rs-root>` in this plugin repository.
+6. **Error types**: engine errors use `https://open-workflow-specification.org/spec/1.0.0/errors/<kind>` (`configuration`, `validation`, `expression`, `authorization`, `timeout`, `communication`, `runtime`); never write legacy `http-error://...` filters. Child job failures are classified by cause, so `.../errors/runtime` does not catch everything — use `.../errors/{kind}` (URI template) or omit the type filter. A failed `run.workflow` re-raises the child's error unchanged. See [Schema Reference](references/schema-reference.md#error-types).
+7. **Schema validation** is enabled by default at runtime (`WORKFLOW_SKIP_SCHEMA_VALIDATION=true` skips it). Plugin runners must still validate their own inputs.
+8. **Upstream docs**: `manual/en/src/workflow.md` (and `manual/ja/src/workflow.md`) in jobworkerp-rs.
+9. **Schema sync**: the bundled schemas are refreshed with `scripts/sync-schema.sh <jobworkerp-rs-root>` in this plugin repository.

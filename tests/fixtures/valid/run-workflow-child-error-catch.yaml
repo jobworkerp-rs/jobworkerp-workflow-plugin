@@ -1,0 +1,25 @@
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: run-workflow-child-error-catch
+  version: "0.0.1"
+
+do:
+  - runChild:
+      try:
+        - child:
+            run:
+              workflow:
+                workflowUrl: ./child.yaml
+                input:
+                  id: 1
+      catch:
+        errors:
+          with:
+            type: https://example.com/errors/item-not-found
+        as: childError
+        do:
+          - markMissing:
+              set:
+                found: false
+                where: ${ $childError.detail }

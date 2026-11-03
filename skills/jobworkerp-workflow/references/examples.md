@@ -441,19 +441,16 @@ Key pattern: `runWorker` references workers by name without needing to specify r
 - SafeApiCall:
     try:
       - CallExternalApi:
-          run:
-            runner:
-              name: HTTP_REQUEST
-              settings:
-                baseUrl: "https://api.example.com"
-              arguments:
-                method: GET
-                path: "/data"
+          call: http           # non-2xx raises a communication error with the response status
+          with:
+            method: get
+            endpoint: https://api.example.com/data
     catch:
       errors:
         with:
-          status: 500
+          type: https://open-workflow-specification.org/spec/1.0.0/errors/communication
       as: apiError             # Variable name for caught error
+      when: ${ $apiError.status >= 500 or $apiError.status == 429 }   # only transient failures
       retry:
         delay:
           seconds: 5
@@ -468,6 +465,10 @@ Key pattern: `runWorker` references workers by name without needing to specify r
               result: "API unavailable, using cached data"
               errorDetail: ${$apiError.detail}
 ```
+
+Key patterns:
+- **Catch by type, then narrow with `when`**: the `as` variable is visible to `when`; errors it rejects (e.g. a 404) are not caught and propagate
+- **`call: http`, not `run.runner` HTTP_REQUEST**: the runner returns a 5xx response as data instead of raising
 
 ## 15. forkTask for Concurrent Execution
 
@@ -1049,14 +1050,10 @@ Key patterns:
 - callUpstream:
     try:
       - fetch:
-          run:
-            runner:
-              name: HTTP_REQUEST
-              settings:
-                baseUrl: https://api.example.com
-              arguments:
-                method: GET
-                path: /data
+          call: http
+          with:
+            method: get
+            endpoint: https://api.example.com/data
     catch:
       as: error
       do:
@@ -1076,3 +1073,63 @@ Key patterns:
 Key patterns:
 - **String `raise.error`** is a runtime expression: an Error object result is rethrown as-is, a string result becomes the `detail` of a status-500 error
 - **`title` / `detail`** of an inline error accept runtime expressions (must evaluate to strings)
+
+## 26. Catching by Error Kind and Child Workflow Errors
+
+```yaml
+- guarded:
+    try:
+      - build:
+          run:
+            runner:
+              name: COMMAND
+              arguments:
+                command: make
+                args: ["build"]
+    catch:
+      errors:
+        with:
+          type: https://open-workflow-specification.org/spec/1.0.0/errors/{kind}   # every standard error
+      as: err
+      do:
+        - classify:
+            switch:
+              - misconfigured:
+                  when: ${ $err.type | endswith("/errors/configuration") }
+                  then: reportConfig
+              - other:
+                  then: reportFailure
+        - reportConfig:
+            set:
+              failure: configuration
+              reason: ${ $err.title }
+            then: end
+        - reportFailure:
+            set:
+              failure: ${ $err.type }
+              status: ${ $err.status }
+- runChild:
+    try:
+      - child:
+          run:
+            workflow:
+              workflowUrl: ./child.yaml    # child raises https://example.com/errors/item-not-found
+              input:
+                id: 1
+    catch:
+      errors:
+        with:
+          type: https://example.com/errors/item-not-found
+      as: childError
+      do:
+        - markMissing:
+            set:
+              found: false
+              where: ${ $childError.detail }   # the child's task position
+```
+
+Key patterns:
+- **`{kind}` template** catches every standard error; switch on `$err.type` to handle kinds differently
+- **Child job failures are classified**: a missing runner/worker/method is `configuration`, bad arguments are `validation`, a runner-internal timeout is `timeout`, a downstream failure is `communication`, anything else is `runtime` (see [Error types](schema-reference.md#error-types))
+- **Child workflow errors propagate unchanged**: the parent catches the `type` / `status` the child raised (user-defined, `timeout`, `validation`, ...)
+- **No `http-error://` types**: the engine no longer raises them; use the standard type URIs

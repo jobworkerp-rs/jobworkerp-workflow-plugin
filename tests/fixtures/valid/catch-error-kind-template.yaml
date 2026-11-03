@@ -1,0 +1,45 @@
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: catch-error-kind-template
+  version: "0.0.1"
+
+do:
+  - guarded:
+      try:
+        - build:
+            run:
+              runner:
+                name: COMMAND
+                arguments:
+                  command: make
+                  args: ["build"]
+      catch:
+        errors:
+          with:
+            type: https://open-workflow-specification.org/spec/1.0.0/errors/{kind}
+        as: err
+        do:
+          - classify:
+              switch:
+                - misconfigured:
+                    when: ${ $err.type | endswith("/errors/configuration") }
+                    then: reportConfig
+                - timedOut:
+                    when: ${ $err.type | endswith("/errors/timeout") }
+                    then: reportTimeout
+                - other:
+                    then: reportFailure
+          - reportConfig:
+              set:
+                failure: configuration
+                reason: ${ $err.title }
+              then: end
+          - reportTimeout:
+              set:
+                failure: timeout
+              then: end
+          - reportFailure:
+              set:
+                failure: ${ $err.type }
+                status: ${ $err.status }

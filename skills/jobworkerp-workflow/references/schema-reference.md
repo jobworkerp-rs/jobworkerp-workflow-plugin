@@ -70,14 +70,14 @@ Each task item in `do` is a single-key object: `- TaskName: { taskDefinition }`.
 | `runner` | yes | no | Runner by name with `settings`, `arguments`, `options`, `using` |
 | `function` | yes | no | `runnerName` (+`settings`/`options`) or `workerName` |
 | `worker` | yes | no | Pre-configured worker by `name` |
-| `workflow` | yes | no | Nested workflow; output is the WORKFLOW runner result |
+| `workflow` | yes | no | Nested workflow; output is the WORKFLOW runner result; a child failure re-raises the child's error |
 | `shell` | yes | yes | COMMAND runner; does not fail on non-zero exit by default |
 | `container` | yes | yes | DOCKER runner; does not fail on non-zero exit by default |
 | `script` | yes | yes | PYTHON_COMMAND runner; non-zero exit always fails; no streaming |
 
 - `await` (default `true`): `false` enqueues fire-and-forget and passes the task input through. Not allowed with `useStreaming: true`.
 - `return` (default `stdout`): `stdout` / `stderr` (raw strings, not parsed as JSON), `code`, `all` (`{code, stdout, stderr}`), `none`.
-- `useStreaming` (sibling of `run`, default `false`): streams intermediate results via ListenStream and collects the final result.
+- `useStreaming` (sibling of `run`, default `false`): streams intermediate results via ListenStream and collects the final result. A stream that ends with a failed End, or without an End, fails the task.
 
 #### run.runner
 
@@ -176,7 +176,7 @@ run:
     executionId: "..."            # Optional
 ```
 
-The parent `workflow_context` is inherited implicitly (`workflowContext` is not a DSL field). The output is the WORKFLOW runner result (`id`, `output` as a string, `status`, ...).
+The parent `workflow_context` is inherited implicitly (`workflowContext` is not a DSL field). The output is the WORKFLOW runner result (`id`, `output` as a string, `status`, ...). When the child fails, the parent task raises the child's error with its `type`, `status` and `title` unchanged (see [Error types](#error-types)).
 
 ### callTask
 
@@ -291,7 +291,7 @@ With `inParallel: true` and `onError: break`, a failing item cancels the other i
     catch:
       errors:
         with:
-          type: "https://..."    # static filters: type, status, instance, title, details
+          type: "https://..."    # static filters: type (URI template, see Error types), status, instance, title, details
           status: 500
       as: error                  # default: error
       when: "${...}"
@@ -308,7 +308,32 @@ With `inParallel: true` and `onError: break`, a failing item cancels the other i
         - FallbackTask: ...
 ```
 
-A caught error has `type`, `status`, `instance`, `title`, `detail` (there is no `message` field).
+A caught error has `type`, `status`, `instance`, `title`, `detail` (there is no `message` field). The error variable is also visible to `when` / `exceptWhen`.
+
+### Error types
+
+Errors raised by the engine use the Open Workflow standard types `https://open-workflow-specification.org/spec/1.0.0/errors/<kind>`. `raise` keeps the `type` / `status` you define.
+
+| kind | status | Raised when |
+|------|--------|-------------|
+| `configuration` | 400 | The definition cannot run as written: unresolved timeout reference, invalid call settings, unsupported script language/option, missing runner / worker / `using` method, runner settings not matching the schema |
+| `validation` | 400 | `input.schema` validation fails, invalid `run.script` argument names, arguments not matching the runner's argument schema or rejected by the runner |
+| `expression` | 400 | A jq / Liquid expression fails, or `raise.error` evaluates to the wrong type |
+| `authorization` | 403 | A call references a secret that is not declared in `use.secrets` or has no value |
+| `timeout` | 408 | A task / workflow `timeout` expires, a runner-internal time limit is hit (e.g. GRPC runner `timeout`), a streaming run times out waiting for results, or `call: grpc` returns `DEADLINE_EXCEEDED` |
+| `communication` | 500, or the response status for `call` | `call: http` / `call: grpc` fails or returns an unaccepted status, a `run.script` external source cannot be fetched, or a child job fails talking to a downstream service (including an interrupted LLM provider stream) |
+| `runtime` | 500 | A child job of a run task fails for any other reason (command failure, cancellation, enqueue/result errors), or other engine failures |
+
+Child job failures are classified as above for every run form and for call tasks; an unclassified call failure is `communication`. A failed child workflow (`run.workflow`, WORKFLOW runner) re-raises the child's error (`type`, `status`, `title`) in the parent, so a type the child `raise`s can be caught by the parent; `instance` points at the parent task and the child's position goes into `detail`.
+
+`run.runner` with HTTP_REQUEST / GRPC returns any received response (including 4xx/5xx or a non-OK code) as data, so it never raises the response status. Use `call: http` / `call: grpc` to catch by status.
+
+Matching rules for `catch.errors.with.type`:
+
+- The value is a URI template; `{name}` matches any text. `https://open-workflow-specification.org/spec/1.0.0/errors/{kind}` catches every standard error. A value without `{...}` must match exactly (case-sensitive).
+- `https://serverlessworkflow.io/spec/` and `https://open-workflow-specification.org/spec/` are treated as the same prefix.
+- A value without a scheme (e.g. `badargument`) is compared as a plain string and logs a warning; it is almost always a mistake.
+- The legacy `http-error://...` types (e.g. `http-error://serviceunavailable`) are no longer raised by the engine; such filters only match errors you raise yourself.
 
 ### setTask
 
