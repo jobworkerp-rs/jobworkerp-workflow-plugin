@@ -1,0 +1,12 @@
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: run-shell-stdin
+  version: "0.0.1"
+
+do:
+  - useToken:
+      run:
+        shell:
+          command: cat
+          stdin: ${ $_secrets.token }

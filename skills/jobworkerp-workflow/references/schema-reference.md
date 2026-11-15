@@ -57,6 +57,15 @@ checkpointing:   # Optional
   3. Literal value (discouraged for credentials)
 - Only declared names resolve; an undeclared reference is an error. `$secrets` is available only while evaluating **call** tasks and is never written to the context. `secrets` is reserved: workflow input cannot override it.
 
+### Secrets passed with a run (`_secrets`)
+
+For tasks other than `call` (e.g. a CI job token for a command), the caller of the run supplies the secret instead of `use.secrets`:
+
+- The caller puts it in the workflow context under the reserved key `_secrets`: the `workflow_context` of the WORKFLOW job arguments or runner settings, e.g. `{"_secrets": {"token": "..."}}`.
+- The workflow reads it as `${ $_secrets.token }`. Without `_secrets` in the context, `$_secrets` is an undefined variable and the expression fails.
+- Give it to a command through the COMMAND runner's `arguments.stdin` (`run.runner` / `run.function`), never `args`, which the runner logs. `run.shell` has no `stdin`.
+- Only logs are masked. Task output, job arguments stored with results, checkpoints, what a command prints, and values transformed by an expression keep the plain value. See `manual/en/src/workflow.md` in jobworkerp-rs for the exact masking rules.
+
 ## Task Types
 
 Each task item in `do` is a single-key object: `- TaskName: { taskDefinition }`.
@@ -133,6 +142,8 @@ run:
   return: all
 ```
 
+`run.shell` has no `stdin`; use `run.runner` with the COMMAND runner's `arguments.stdin`.
+
 #### run.container
 
 <!-- validate:skip -->
@@ -150,6 +161,8 @@ run:
     successExitCodes: []          # jobworkerp extension
   return: stdout
 ```
+
+`run.container` has no `volumes` or network fields; use `run.runner` with `name: DOCKER` (see runner-schemas.md, DockerArgs).
 
 #### run.script
 
@@ -397,6 +410,19 @@ catch:
 
 The body, `output.as`, and `export.as` are bypassed and the raw input passes through. Seed variables up front and resolve them with an unconditional `set` (see SKILL.md "Pitfall").
 
+### `then: wait` and checkpoints
+
+`then: wait` (on any task, not only `wait` tasks) suspends the run until it is resumed. Where it may appear:
+
+| Placement | Behavior |
+|---|---|
+| A task in `do` (including the top level) | If a task follows, the run waits with that task as the resume position; with no later task it completes |
+| A task in a `for` body (also inside a nested `do`) | Runtime `configuration` error |
+| The `for` task itself | Waits after all iterations |
+| A task in a `fork` branch | Not supported; place wait points outside `fork` |
+
+Schema validation does not check these placements. Saving a checkpoint needs `checkpointing.enabled: true` **and** an `executionId` given at execution time (it is not generated). The `position` of a `Waiting` result is the resume position, not proof that a checkpoint was saved.
+
 ## Timeouts and Child Job Cancellation
 
 - `timeout` is optional everywhere; without it a task has no deadline.
@@ -415,7 +441,7 @@ The body, `output.as`, and `export.as` are bypassed and the raw input passes thr
 <!-- validate:skip -->
 ```yaml
 options:
-  channel: workflow           # concurrency channel
+  channel: workflow           # concurrency channel; a runtime expression is allowed
   queueType: NORMAL           # NORMAL | WITH_BACKUP | DB_ONLY
   responseType: DIRECT        # DIRECT | NO_RESULT
   storeSuccess: true
@@ -429,6 +455,8 @@ options:
 ```
 
 Valid inside `run.runner` and `run.function` (with `runnerName`) only.
+
+`channel` is evaluated as a jq or Liquid expression, so it can come from the input: `channel: ${ $workflow.input.docker_channel }`. A `null` or empty result means the default channel; an array or object is an `expression` error. A worker with `useStatic: true` keeps the channel it was created with (its runner pool is sized by it), so a different channel is ignored with a warning.
 
 ## Runtime Expressions
 
@@ -454,8 +482,11 @@ Valid inside `run.runner` and `run.function` (with `runnerName`) only.
 "${if .x then .y else .z end}"
 "${now | strftime(\"%Y-%m-%d\")}"
 "${.text | fromjson}"          # strip ```json fences first
+'${.text | if test("^[ \\t\\r\\n]*$") then {} else fromjson end}'  # empty -> {}
 "${.data | tojson}"
 ```
+
+Since jobworkerp-rs v0.24.4, `fromjson` raises an `expression` error on empty or whitespace-only input. Guard it with a fallback that fits the value (`{}`, `[]` or `null`), as above; `//` does not help because it replaces only `null` and `false`, not `""`. Use `error(...)` when the value is required.
 
 ### Liquid: `$${...}`
 

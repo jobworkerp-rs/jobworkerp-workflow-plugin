@@ -149,6 +149,11 @@ arguments:
         # OR toolCalls: { calls: [{ callId, fnName, fnArguments }] }
         # OR toolExecutionRequests: { requests: [{ callId, fnName, fnArguments }] }
         # OR toolResults: { results: [{ callId, fnName, content, isError }] }
+    - role: assistant            # `parts` instead of `content`: ordered text and tool calls in one message
+      parts:
+        items:
+          - text: "I will look that up."
+          - toolCalls: { calls: [{ callId: "call-1", fnName: "lookup", fnArguments: "{}" }] }
   options:
     maxTokens: 8192
     temperature: 0.3
@@ -171,6 +176,8 @@ arguments:
     parallelToolCalls: true
   jsonSchema: '{"type":"object","properties":{}}'  # Structured output
 ```
+
+A message has either `content` or `parts`, not both. `parts.items` holds only `text` and `toolCalls`. A following TOOL message must answer with `callId`s of the tool calls in the ASSISTANT message right before it.
 
 ### Arguments for `using: completion` (LLMCompletionArgs)
 
@@ -352,15 +359,18 @@ arguments:
   env: ["KEY=value"]
   cmd: ["python", "script.py"]
   argsEscaped: false
-  volumes: ["/data:/data"]
+  volumes: ["/data:/data"]          # host:container[:mode]; no ':' = anonymous volume
   workingDir: "/app"
   entrypoint: ["python"]
-  networkDisabled: false
+  networkDisabled: false              # true = no networking
+  networkMode: "myproject_default"    # same values as `docker run --network`; ignored when networkDisabled
   shell: ["/bin/sh", "-c"]
   timeoutSec: 300                     # useStatic: false only
   treatNonzeroAsError: true
   successExitCodes: [0]
 ```
+
+`volumes`, `networkDisabled` and `networkMode` apply only when `useStatic: false` (run mode). `networkMode` takes a user-defined network (e.g. `<project>_default` of `docker compose -p <project> up -d`, whose services are then reachable by name), `bridge`, `host`, `none` or `container:<name|id>`; empty keeps Docker's default network. These fields exist only on the runner form (`run.runner` with `name: DOCKER`); `run.container` does not accept them.
 
 ### Result (DockerResult)
 
@@ -456,8 +466,8 @@ using: run
 arguments:
   workflowUrl: "./another.yaml"      # Optional override (or workflowData)
   input: '{"key": "value"}'          # Workflow input (JSON or plain string)
-  workflowContext: '{"key": "val"}'  # Context variables (JSON object string)
-  executionId: "uuid-v7"
+  workflowContext: '{"key": "val"}'  # Context variables (JSON object string); key `_secrets` is reserved for secrets read as $_secrets
+  executionId: "uuid-v7"             # required to save checkpoints; not generated
   fromCheckpoint:
     position: "/do/2"
     data:

@@ -1,0 +1,21 @@
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: then-wait-checkpoint
+  version: "0.0.1"
+
+checkpointing:
+  enabled: true
+  storage: memory
+do:
+  - prepare:
+      set:
+        draft: ${.text}
+      then: wait
+  - publish:
+      run:
+        runner:
+          name: COMMAND
+          arguments:
+            command: echo
+            args: ["${.draft}"]

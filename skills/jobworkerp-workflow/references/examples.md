@@ -1133,3 +1133,68 @@ Key patterns:
 - **Child job failures are classified**: a missing runner/worker/method is `configuration`, bad arguments are `validation`, a runner-internal timeout is `timeout`, a downstream failure is `communication`, anything else is `runtime` (see [Error types](schema-reference.md#error-types))
 - **Child workflow errors propagate unchanged**: the parent catches the `type` / `status` the child raised (user-defined, `timeout`, `validation`, ...)
 - **No `http-error://` types**: the engine no longer raises them; use the standard type URIs
+
+## 27. Caller-Supplied Secret and Channel (`_secrets`, channel expression)
+
+A CI-style run: the caller chooses the channel (and compose network) through the input and hands a job token through the workflow context. `$secrets` is for call tasks only, so a command gets the token from `$_secrets` through `stdin`.
+
+```yaml
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: ci-check-with-caller-secret
+  version: "0.0.1"
+input:
+  schema:
+    document:
+      type: object
+      properties:
+        docker_channel:
+          type: string            # omit to use the default channel
+        compose_network:
+          type: string            # e.g. "<project>_default"; omit for Docker's default network
+do:
+  - runTests:
+      run:
+        runner:
+          name: DOCKER
+          settings:
+            fromImage: "alpine:3.20"
+          arguments:
+            image: "alpine:3.20"
+            cmd: ["sh", "-c", "echo tests passed"]
+            networkMode: ${ $workflow.input.compose_network // "" }
+            treatNonzeroAsError: true
+          options:
+            channel: ${ $workflow.input.docker_channel }
+            useStatic: false
+      output:
+        as:
+          testLog: ${.stdout}
+  - useToken:
+      run:
+        runner:
+          name: COMMAND
+          arguments:
+            command: sh
+            args: ["-c", "wc -c"]       # replace with a command that reads the token from stdin
+            stdin: ${ $_secrets.token }
+            treatNonzeroAsError: true
+      output:
+        as:
+          testLog: ${ $input.testLog }
+          tokenBytes: ${.stdout}
+```
+
+The caller passes the token in `workflow_context` (WORKFLOW job arguments or runner settings), e.g. with `jobworkerp-client job enqueue-workflow --context-file ctx.json`:
+
+```json
+{"_secrets": {"token": "<job token>"}}
+```
+
+Key patterns:
+- **Channel from input**: `options.channel` is an expression; `null` or `""` falls back to the default channel. Do not invent a fallback channel name that the server may not run (`// "docker"`): the job would wait forever. A `useStatic: true` worker keeps its own channel
+- **`_secrets` is supplied by the caller**, not declared in `use.secrets`; without it, `$_secrets` is undefined and the task fails with an `expression` error
+- **`stdin`, not `args`**: the COMMAND runner logs `args`; `run.shell` has no `stdin`, so use `run.runner`
+- **Masking covers logs only**: never put the token in task output (`output.as`, `export.as`) or print it from the command
+- **`networkMode` and `volumes`** are DOCKER runner arguments (run mode only); `run.container` cannot set them
