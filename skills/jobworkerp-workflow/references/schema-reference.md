@@ -410,6 +410,19 @@ catch:
 
 The body, `output.as`, and `export.as` are bypassed and the raw input passes through. Seed variables up front and resolve them with an unconditional `set` (see SKILL.md "Pitfall").
 
+### `then: wait` and checkpoints
+
+`then: wait` (on any task, not only `wait` tasks) suspends the run until it is resumed. Where it may appear:
+
+| Placement | Behavior |
+|---|---|
+| A task in `do` (including the top level) | If a task follows, the run waits with that task as the resume position; with no later task it completes |
+| A task in a `for` body (also inside a nested `do`) | Runtime `configuration` error |
+| The `for` task itself | Waits after all iterations |
+| A task in a `fork` branch | Not supported; place wait points outside `fork` |
+
+Schema validation does not check these placements. Saving a checkpoint needs `checkpointing.enabled: true` **and** an `executionId` given at execution time (it is not generated). The `position` of a `Waiting` result is the resume position, not proof that a checkpoint was saved.
+
 ## Timeouts and Child Job Cancellation
 
 - `timeout` is optional everywhere; without it a task has no deadline.
@@ -469,8 +482,11 @@ Valid inside `run.runner` and `run.function` (with `runnerName`) only.
 "${if .x then .y else .z end}"
 "${now | strftime(\"%Y-%m-%d\")}"
 "${.text | fromjson}"          # strip ```json fences first
+'${.text | if test("^[ \\t\\r\\n]*$") then {} else fromjson end}'  # empty -> {}
 "${.data | tojson}"
 ```
+
+Since jobworkerp-rs v0.24.4, `fromjson` raises an `expression` error on empty or whitespace-only input. Guard it with a fallback that fits the value (`{}`, `[]` or `null`), as above; `//` does not help because it replaces only `null` and `false`, not `""`. Use `error(...)` when the value is required.
 
 ### Liquid: `$${...}`
 

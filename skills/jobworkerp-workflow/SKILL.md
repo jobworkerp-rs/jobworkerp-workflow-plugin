@@ -263,7 +263,7 @@ See [Runner Schemas](references/runner-schemas.md) for complete settings/argumen
 
 - **jq** for data transformation, **Liquid** for text templating.
 - Liquid **cannot** read environment variables — use jq (`${"Bearer " + env.TOKEN}`) or, for call tasks, `use.secrets`.
-- `fromjson` fails on Markdown fences (```` ```json ````). Strip fences from LLM output before parsing.
+- `fromjson` fails on Markdown fences (```` ```json ````) and, since jobworkerp-rs v0.24.4, on empty or whitespace-only input. Strip fences from LLM output and guard empty strings before parsing (see [Schema Reference](references/schema-reference.md#jq-)).
 
 ## Data Flow Pattern
 
