@@ -11,7 +11,7 @@
       "name": "jobworkerp-workflow",
       "source": "./",
       "description": "Create and edit workflow YAML for the jobworkerp-rs workflow DSL (based on Open Workflow DSL v1.0.0 with jobworkerp extensions). Supports built-in runners, MCP servers, plugin runners, call http/grpc tasks, process tasks, flow control, and jq/Liquid runtime expressions.",
-      "version": "1.3.0"
+      "version": "1.4.0"
     }
   ]
 }

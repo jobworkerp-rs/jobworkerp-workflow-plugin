@@ -8,6 +8,7 @@ A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) plugin that help
 - Built-in runner support: COMMAND, LLM, HTTP_REQUEST, GRPC, DOCKER, PYTHON_COMMAND, WORKFLOW, SANDBOX
 - Process tasks: `run.shell`, `run.container`, `run.script`, `run.workflow` (with `await` / `return`)
 - Service calls: `call: http` / `call: grpc` with `use.authentications` and `use.secrets`
+- Caller-supplied secrets for non-call tasks (`_secrets` in the workflow context) and `options.channel` as a runtime expression
 - MCP server integration patterns
 - Plugin runner usage guidance
 - Flow control: forTask, forkTask, switchTask, tryTask, doTask, setTask, raiseTask, waitTask, named timeouts
