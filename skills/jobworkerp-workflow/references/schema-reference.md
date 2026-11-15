@@ -57,6 +57,15 @@ checkpointing:   # Optional
   3. Literal value (discouraged for credentials)
 - Only declared names resolve; an undeclared reference is an error. `$secrets` is available only while evaluating **call** tasks and is never written to the context. `secrets` is reserved: workflow input cannot override it.
 
+### Secrets passed with a run (`_secrets`)
+
+For tasks other than `call` (e.g. a CI job token for a command), the caller of the run supplies the secret instead of `use.secrets`:
+
+- The caller puts it in the workflow context under the reserved key `_secrets`: the `workflow_context` of the WORKFLOW job arguments or runner settings, e.g. `{"_secrets": {"token": "..."}}`.
+- The workflow reads it as `${ $_secrets.token }`. Without `_secrets` in the context, `$_secrets` is an undefined variable and the expression fails.
+- Give it to a command through the COMMAND runner's `arguments.stdin` (`run.runner` / `run.function`), never `args`, which the runner logs. `run.shell` has no `stdin`.
+- Only logs are masked. Task output, job arguments stored with results, checkpoints, what a command prints, and values transformed by an expression keep the plain value. See `manual/en/src/workflow.md` in jobworkerp-rs for the exact masking rules.
+
 ## Task Types
 
 Each task item in `do` is a single-key object: `- TaskName: { taskDefinition }`.
@@ -132,6 +141,8 @@ run:
     successExitCodes: [1]         # jobworkerp extension
   return: all
 ```
+
+`run.shell` has no `stdin`; use `run.runner` with the COMMAND runner's `arguments.stdin`.
 
 #### run.container
 
@@ -415,7 +426,7 @@ The body, `output.as`, and `export.as` are bypassed and the raw input passes thr
 <!-- validate:skip -->
 ```yaml
 options:
-  channel: workflow           # concurrency channel
+  channel: workflow           # concurrency channel; a runtime expression is allowed
   queueType: NORMAL           # NORMAL | WITH_BACKUP | DB_ONLY
   responseType: DIRECT        # DIRECT | NO_RESULT
   storeSuccess: true
@@ -429,6 +440,8 @@ options:
 ```
 
 Valid inside `run.runner` and `run.function` (with `runnerName`) only.
+
+`channel` is evaluated as a jq or Liquid expression, so it can come from the input: `channel: ${ $workflow.input.docker_channel }`. A `null` or empty result means the default channel; an array or object is an `expression` error. A worker with `useStatic: true` keeps the channel it was created with (its runner pool is sized by it), so a different channel is ignored with a warning.
 
 ## Runtime Expressions
 

@@ -41,7 +41,7 @@ input:                 # Optional - input schema / input.from transform
 use:                   # Optional - reusable components
   timeouts: {}         #   named timeouts, referenced as `timeout: <name>`
   authentications: {}  #   named bearer/basic policies for call tasks
-  secrets: []          #   declared secret names (values come from env)
+  secrets: []          #   declared secret names (values come from env; call tasks only)
 timeout:               # Optional - whole-workflow timeout (no default)
   after: { hours: 1 }
 do:                    # REQUIRED - ordered task list
@@ -117,7 +117,7 @@ Each `run` holds exactly one execution form. `await` (default `true`) can be set
           command: echo
           args: ["Hello"]
         options:                   # Worker options (inside `runner`, not under `run`)
-          channel: workflow
+          channel: workflow        # may be an expression, e.g. ${ $workflow.input.channel }
           useStatic: false
           storeSuccess: true
           storeFailure: true
@@ -172,6 +172,8 @@ See [Schema Reference](references/schema-reference.md#runtask) for all fields.
 `output: response` yields `{ request: { method, uri, headers }, statusCode, headers, content }`. A final status outside 200–299 (200–399 with `redirect: true`) raises a `communication` error carrying the response status; branch on it with `try`/`catch`, not on `statusCode`.
 
 `call: grpc` takes `service` (name/host/port), `method`, `arguments` (requires server reflection); a non-OK status raises an error. Secret values are never written in YAML: declare names under `use.secrets` and supply `WORKFLOW_SECRET_<UPPER_SNAKE_NAME>` env vars. See [Schema Reference](references/schema-reference.md#calltask).
+
+Other tasks cannot use `$secrets`. To give a secret to a command, the caller passes it in the workflow context under `_secrets` and the task reads `${ $_secrets.<name> }`, preferably via the COMMAND runner's `arguments.stdin`. See [Schema Reference](references/schema-reference.md#secrets-passed-with-a-run-_secrets).
 
 ## Runner Quick Reference
 

@@ -1,0 +1,26 @@
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: run-runner-channel-expression
+  version: "0.0.1"
+
+do:
+  - fromInput:
+      run:
+        runner:
+          name: COMMAND
+          arguments:
+            command: echo
+            args: ["hello"]
+          options:
+            channel: ${ $workflow.input.docker_channel }
+            useStatic: false
+  - fromLiquid:
+      run:
+        function:
+          runnerName: COMMAND
+          arguments:
+            command: echo
+            args: ["hello"]
+          options:
+            channel: $${{{ workflow.input.docker_channel }}}

@@ -456,7 +456,7 @@ using: run
 arguments:
   workflowUrl: "./another.yaml"      # Optional override (or workflowData)
   input: '{"key": "value"}'          # Workflow input (JSON or plain string)
-  workflowContext: '{"key": "val"}'  # Context variables (JSON object string)
+  workflowContext: '{"key": "val"}'  # Context variables (JSON object string); key `_secrets` is reserved for secrets read as $_secrets
   executionId: "uuid-v7"
   fromCheckpoint:
     position: "/do/2"
