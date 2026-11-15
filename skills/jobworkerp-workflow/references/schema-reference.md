@@ -162,6 +162,8 @@ run:
   return: stdout
 ```
 
+`run.container` has no `volumes` or network fields; use `run.runner` with `name: DOCKER` (see runner-schemas.md, DockerArgs).
+
 #### run.script
 
 <!-- validate:skip -->

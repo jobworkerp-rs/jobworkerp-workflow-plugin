@@ -1,0 +1,13 @@
+document:
+  dsl: "0.0.1"
+  namespace: default
+  name: run-container-network-mode
+  version: "0.0.1"
+
+do:
+  - inNetwork:
+      run:
+        container:
+          image: alpine:3.20
+          command: ["echo", "hello"]
+          networkMode: myproject_default
